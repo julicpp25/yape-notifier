@@ -6,11 +6,16 @@ const app = express();
 app.use(express.json());
 
 const TELEGRAM_TOKEN = '8953997654:AAHnHbM4Oa-OgP_FzF4v_JJzBWZPqKXdXwo';
-
-// Coloca aquí el ID largo de tu hoja de Google Sheets
 const SPREADSHEET_ID = '16tuTOojGjw9d_dmiJo-koldetLvruIJYXXLIcv-3Wkw';
 
-// Autenticación usando el archivo credentials.json creado en Render
+// Mapeo opcional: asigna un nombre a cada Chat ID para crear la pestaña con el nombre del negocio
+// Si un chat_id no está aquí, usará el propio Chat ID como nombre de pestaña.
+const NEGOCIOS = {
+  '6061349193': 'Mi_Negocio_1',
+  '1234567890': 'Don_Pepe_Bodega',
+  '9876543210': 'Farmacia_Santa_Rosa'
+};
+
 const auth = new google.auth.GoogleAuth({
   keyFile: 'credentials.json',
   scopes: ['https://www.googleapis.com/auth/spreadsheets'],
@@ -24,8 +29,11 @@ app.post('/api/yape-notification', async (req, res) => {
   const chatId = chat_id || '6061349193';
   const now = new Date().toLocaleString('es-PE', { timeZone: 'America/Lima' });
 
+  // Determinar la pestaña según el Chat ID recibido de la app
+  const targetSheet = NEGOCIOS[chatId] || `Negocio_${chatId}`;
+
   try {
-    // 1. Enviar notificación a Telegram
+    // 1. Enviar notificación al Telegram del dueño correspondiente
     const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
     const messageText = `🔔 *¡Nuevo Yape Recibido!*\n\n👤 *De:* ${clientName}\n💵 *Monto:* S/ ${payAmount}\n📅 *Fecha:* ${now}`;
 
@@ -35,19 +43,20 @@ app.post('/api/yape-notification', async (req, res) => {
       parse_mode: 'Markdown'
     });
 
-    // 2. Registrar la venta en Google Sheets
+    // 2. Registrar en la pestaña correspondiente de Google Sheets
     const sheets = google.sheets({ version: 'v4', auth });
+    
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Hoja 1!A:D', // Cambia "Hoja 1" si tu pestaña tiene otro nombre
+      range: `'${targetSheet}'!A:D`,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [[now, clientName, payAmount, chatId]],
       },
     });
 
-    console.log(`[OK] Registrado en Sheets y enviado a Telegram: ${clientName} - S/ ${payAmount}`);
-    res.status(200).json({ status: 'success', message: 'Notificación procesada y registrada.' });
+    console.log(`[OK] Guardado en pestaña [${targetSheet}] y enviado a Telegram ID [${chatId}]`);
+    res.status(200).json({ status: 'success', message: 'Notificación procesada.' });
 
   } catch (error) {
     console.error('Error procesando la solicitud:', error.message);
