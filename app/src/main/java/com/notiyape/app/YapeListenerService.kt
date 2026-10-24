@@ -21,12 +21,15 @@ class YapeListenerService : NotificationListenerService() {
         if (sbn == null) return
 
         val pkg = sbn.packageName
-        // Detecta Yape oficial
+        
+        // Escucha notificaciones de Yape
         if (pkg == "com.bcp.innovacxion.yapeapp") {
             val extras = sbn.notification.extras
             val text = extras.getCharSequence("android.text")?.toString() ?: ""
 
-            procesarYape(text)
+            if (text.isNotEmpty()) {
+                procesarYape(text)
+            }
         }
     }
 
@@ -36,19 +39,29 @@ class YapeListenerService : NotificationListenerService() {
 
         if (webhookUrl.isEmpty()) return
 
-        val patron = Pattern.compile("(.+?)\\s+te\\s+envi[oó]\\s+S/\\s*([0-9]+(?:\\.[0-9]{1,2})?)", Pattern.CASE_INSENSITIVE)
-        val matcher = patron.matcher(texto)
-
-        var remitente = "Desconocido"
+        var remitente = "Cliente"
         var monto = "0.00"
 
-        if (matcher.find()) {
-            remitente = matcher.group(1)?.trim() ?: remitente
-            monto = matcher.group(2)?.trim() ?: monto
+        // 1. Extraer Monto: Busca "S/" seguido del número con decimales
+        val patronMonto = Pattern.compile("S/\\.?\\s*([0-9]+(?:[.,][0-9]{1,2})?)", Pattern.CASE_INSENSITIVE)
+        val matcherMonto = patronMonto.matcher(texto)
+        if (matcherMonto.find()) {
+            monto = matcherMonto.group(1)?.replace(",", ".") ?: "0.00"
+        }
+
+        // 2. Extraer Remitente: Extrae el nombre antes de "te envió" y quita prefijos como "Yape!"
+        val patronNombre = Pattern.compile("(?:.*(?:Yape!|Yape)\\s*)?(.+?)\\s+te\\s+(?:envi[oó]|mand[oó]|transfiri[oó])", Pattern.CASE_INSENSITIVE)
+        val matcherNombre = patronNombre.matcher(texto)
+        if (matcherNombre.find()) {
+            remitente = matcherNombre.group(1)
+                ?.replace("¡", "")
+                ?.replace("!", "")
+                ?.trim() ?: "Cliente"
         } else {
             remitente = texto
         }
 
+        // 3. Enviar a Google Sheets
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val json = """{"nombre": "$remitente", "monto": "$monto"}"""
