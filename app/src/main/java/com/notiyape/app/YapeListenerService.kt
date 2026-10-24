@@ -10,7 +10,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.regex.Pattern
 
 class YapeListenerService : NotificationListenerService() {
 
@@ -22,7 +21,7 @@ class YapeListenerService : NotificationListenerService() {
 
         val pkg = sbn.packageName
         
-        // Escucha notificaciones de Yape
+        // Detecta notificación de Yape
         if (pkg == "com.bcp.innovacxion.yapeapp") {
             val extras = sbn.notification.extras
             val text = extras.getCharSequence("android.text")?.toString() ?: ""
@@ -39,29 +38,26 @@ class YapeListenerService : NotificationListenerService() {
 
         if (webhookUrl.isEmpty()) return
 
+        // 1. EXTRAER EL MONTO: Busca "S/" seguido de cualquier número (tenga o no decimales)
+        val regexMonto = Regex("""S/\.?\s*([\d]+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
+        val matchMonto = regexMonto.find(texto)
+        val monto = matchMonto?.groups?.get(1)?.value?.replace(",", ".") ?: "0.00"
+
+        // 2. EXTRAER EL NOMBRE: Corta antes de "te envió" y elimina la palabra "Yape!"
         var remitente = "Cliente"
-        var monto = "0.00"
-
-        // 1. Extraer Monto: Busca "S/" seguido del número con decimales
-        val patronMonto = Pattern.compile("S/\\.?\\s*([0-9]+(?:[.,][0-9]{1,2})?)", Pattern.CASE_INSENSITIVE)
-        val matcherMonto = patronMonto.matcher(texto)
-        if (matcherMonto.find()) {
-            monto = matcherMonto.group(1)?.replace(",", ".") ?: "0.00"
-        }
-
-        // 2. Extraer Remitente: Extrae el nombre antes de "te envió" y quita prefijos como "Yape!"
-        val patronNombre = Pattern.compile("(?:.*(?:Yape!|Yape)\\s*)?(.+?)\\s+te\\s+(?:envi[oó]|mand[oó]|transfiri[oó])", Pattern.CASE_INSENSITIVE)
-        val matcherNombre = patronNombre.matcher(texto)
-        if (matcherNombre.find()) {
-            remitente = matcherNombre.group(1)
-                ?.replace("¡", "")
-                ?.replace("!", "")
-                ?.trim() ?: "Cliente"
+        if (texto.contains("te envi", ignoreCase = true)) {
+            val antesDeEnvio = texto.split(Regex("te envi[oó]", RegexOption.IGNORE_CASE))[0]
+            remitente = antesDeEnvio
+                .replace("¡", "")
+                .replace("!", "")
+                .replace("Te llegó un Yape", "", ignoreCase = true)
+                .replace("Yape", "", ignoreCase = true)
+                .trim()
         } else {
             remitente = texto
         }
 
-        // 3. Enviar a Google Sheets
+        // 3. ENVIAR A GOOGLE SHEETS
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val json = """{"nombre": "$remitente", "monto": "$monto"}"""
