@@ -22,25 +22,30 @@ class YapeListenerService : NotificationListenerService() {
 
         val pkg = sbn.packageName
         
-        // Escucha Yape
-        if (pkg == "com.bcp.innovacxion.yapeapp") {
+        // Paquetes bancarios oficiales en Perú
+        val esYape = (pkg == "com.bcp.innovacxion.yapeapp")
+        val esInterbank = (pkg == "pe.com.interbank.mobilebanking")
+        val esBBVA = (pkg == "com.bbva.bbvacontigo")
+        val esScotiabank = (pkg == "com.scotiabank.peru.pe")
+
+        if (esYape || esInterbank || esBBVA || esScotiabank) {
             val extras = sbn.notification.extras
             val text = extras.getCharSequence("android.text")?.toString() 
                        ?: extras.getCharSequence("android.bigText")?.toString() 
                        ?: extras.getString("android.title") ?: ""
 
             if (text.isNotEmpty()) {
-                procesarYape(text)
+                val metodo = if (esYape) "Yape" else "Plin / Banco"
+                procesarPago(text, metodo)
             }
         }
     }
 
-    private fun procesarYape(texto: String) {
+    private fun procesarPago(texto: String, metodo: String) {
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
-        // Si está vacío, usa TEST-01 por defecto para no fallar jamás
         val codigoTienda = prefs.getString("codigo_tienda", "TEST-01")?.ifEmpty { "TEST-01" } ?: "TEST-01"
 
-        // 1. Extraer Monto
+        // 1. Extraer Monto (Busca S/ seguido del número)
         val regexMonto = Regex("""S/\.?\s*([\d]+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
         val matchMonto = regexMonto.find(texto)
         val monto = matchMonto?.groups?.get(1)?.value?.replace(",", ".") ?: "0.00"
@@ -59,10 +64,10 @@ class YapeListenerService : NotificationListenerService() {
             remitente = texto
         }
 
-        // 3. Enviar al Servidor
+        // 3. Enviar al Servidor Central
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val json = """{"codigoTienda": "$codigoTienda", "nombre": "$remitente", "monto": "$monto"}"""
+                val json = """{"codigoTienda": "$codigoTienda", "nombre": "$remitente ($metodo)", "monto": "$monto"}"""
                 val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
                 val request = Request.Builder().url(SERVIDOR_URL).post(body).build()
                 client.newCall(request).execute().close()
