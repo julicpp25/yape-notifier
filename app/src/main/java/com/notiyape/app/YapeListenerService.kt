@@ -14,6 +14,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 class YapeListenerService : NotificationListenerService() {
 
     private val client = OkHttpClient()
+    private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbyOiEdKFVc08ti51lu4Q4UT2qAadmiR3D6jIjUxul8coZHtTQNHgUvO-0LzUuu11ewOFQ/exec"
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)
@@ -21,10 +22,12 @@ class YapeListenerService : NotificationListenerService() {
 
         val pkg = sbn.packageName
         
-        // Detecta notificación de Yape
+        // Escucha Yape
         if (pkg == "com.bcp.innovacxion.yapeapp") {
             val extras = sbn.notification.extras
-            val text = extras.getCharSequence("android.text")?.toString() ?: ""
+            val text = extras.getCharSequence("android.text")?.toString() 
+                       ?: extras.getCharSequence("android.bigText")?.toString() 
+                       ?: extras.getString("android.title") ?: ""
 
             if (text.isNotEmpty()) {
                 procesarYape(text)
@@ -34,16 +37,15 @@ class YapeListenerService : NotificationListenerService() {
 
     private fun procesarYape(texto: String) {
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
-        val webhookUrl = prefs.getString("sheet_url", "") ?: ""
+        // Si está vacío, usa TEST-01 por defecto para no fallar jamás
+        val codigoTienda = prefs.getString("codigo_tienda", "TEST-01")?.ifEmpty { "TEST-01" } ?: "TEST-01"
 
-        if (webhookUrl.isEmpty()) return
-
-        // 1. EXTRAER EL MONTO: Busca "S/" seguido de cualquier número (tenga o no decimales)
+        // 1. Extraer Monto
         val regexMonto = Regex("""S/\.?\s*([\d]+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
         val matchMonto = regexMonto.find(texto)
         val monto = matchMonto?.groups?.get(1)?.value?.replace(",", ".") ?: "0.00"
 
-        // 2. EXTRAER EL NOMBRE: Corta antes de "te envió" y elimina la palabra "Yape!"
+        // 2. Extraer Remitente
         var remitente = "Cliente"
         if (texto.contains("te envi", ignoreCase = true)) {
             val antesDeEnvio = texto.split(Regex("te envi[oó]", RegexOption.IGNORE_CASE))[0]
@@ -57,12 +59,12 @@ class YapeListenerService : NotificationListenerService() {
             remitente = texto
         }
 
-        // 3. ENVIAR A GOOGLE SHEETS
+        // 3. Enviar al Servidor
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val json = """{"nombre": "$remitente", "monto": "$monto"}"""
+                val json = """{"codigoTienda": "$codigoTienda", "nombre": "$remitente", "monto": "$monto"}"""
                 val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
-                val request = Request.Builder().url(webhookUrl).post(body).build()
+                val request = Request.Builder().url(SERVIDOR_URL).post(body).build()
                 client.newCall(request).execute().close()
             } catch (e: Exception) {
                 e.printStackTrace()
