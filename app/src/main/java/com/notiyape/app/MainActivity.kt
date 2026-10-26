@@ -12,11 +12,12 @@ import android.widget.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.net.URLEncoder
 
 class MainActivity : Activity() {
 
@@ -34,6 +35,13 @@ class MainActivity : Activity() {
 
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
 
+        // Genera un código único automático si es nuevo (Ej: T-7821)
+        var codTienda = prefs.getString("codigo_tienda", "") ?: ""
+        if (codTienda.isEmpty()) {
+            codTienda = "T-" + (1000..9999).random()
+            prefs.edit().putString("codigo_tienda", codTienda).apply()
+        }
+
         val scroll = ScrollView(this)
         val mainLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -49,25 +57,58 @@ class MainActivity : Activity() {
         }
         mainLayout.addView(titulo)
 
-        // ================= PASO 1: DATOS DEL NEGOCIO =================
+        // ================= PASO 1: VINCULAR TELEGRAM PRIMERO =================
         layoutPaso1 = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         
         val t1 = TextView(this).apply {
-            text = "PASO 1 DE 3: Tu Negocio y Excel"
+            text = "PASO 1 DE 3: ¿A qué celular avisamos?"
             textSize = 17f
             setTextColor(Color.BLACK)
             setPadding(0, 0, 0, 10)
         }
         val desc1 = TextView(this).apply {
-            text = "Ingresa tu negocio para crear tu hoja contable automática:"
+            text = "Conecta el teléfono personal donde quieres recibir las alertas de cobro cuando no estés en tu negocio:\n(Tu código de tienda: $codTienda)"
+            textSize = 13f
+            setPadding(0, 0, 0, 15)
+        }
+        val btnTelegram = Button(this).apply {
+            text = "📲 1. VINCULAR CON TELEGRAM (1 Toque)"
+            setBackgroundColor(Color.parseColor("#0088CC"))
+            setTextColor(Color.WHITE)
+            setOnClickListener {
+                val url = "https://t.me/$BOT_USERNAME?start=$codTienda"
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            }
+        }
+        val btnIrPaso2 = Button(this).apply {
+            text = "Ya lo vinculé, Continuar al Paso 2 ➡️"
+            setOnClickListener { mostrarPaso(2) }
+        }
+
+        layoutPaso1.addView(t1)
+        layoutPaso1.addView(desc1)
+        layoutPaso1.addView(btnTelegram)
+        layoutPaso1.addView(btnIrPaso2)
+
+        // ================= PASO 2: CREAR EXCEL =================
+        layoutPaso2 = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        
+        val t2 = TextView(this).apply {
+            text = "PASO 2 DE 3: Tu Negocio y tu Excel"
+            textSize = 17f
+            setTextColor(Color.BLACK)
+            setPadding(0, 0, 0, 10)
+        }
+        val desc2 = TextView(this).apply {
+            text = "Ingresa los datos para generar tu hoja de ventas contable:"
             textSize = 13f
             setPadding(0, 0, 0, 15)
         }
         val inputNombre = EditText(this).apply { hint = "Nombre del Negocio (Ej: Bodega Central)" }
         val inputCorreo = EditText(this).apply { hint = "Tu correo Gmail (para darte el Excel)" }
         
-        val btnPaso1 = Button(this).apply {
-            text = "Crear mi Excel y Pasar al Paso 2 ➡️"
+        val btnCrearExcel = Button(this).apply {
+            text = "✨ Crear mi Excel y Pasar al Paso 3 ➡️"
             setBackgroundColor(Color.parseColor("#107C41"))
             setTextColor(Color.WHITE)
             setOnClickListener {
@@ -79,29 +120,25 @@ class MainActivity : Activity() {
                     return@setOnClickListener
                 }
 
-                Toast.makeText(this@MainActivity, "Creando tu Excel en Google...", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Creando tu Excel...", Toast.LENGTH_SHORT).show()
 
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
-                        val json = JSONObject().apply {
-                            put("accion", "crear_tienda")
-                            put("nombreNegocio", nom)
-                            put("correo", cor)
-                        }
-                        val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-                        val req = Request.Builder().url(SERVIDOR_URL).post(body).build()
+                        val nomEnc = URLEncoder.encode(nom, "UTF-8")
+                        val corEnc = URLEncoder.encode(cor, "UTF-8")
+                        val urlGet = "$SERVIDOR_URL?accion=crear_tienda&codigoTienda=$codTienda&nombreNegocio=$nomEnc&correo=$corEnc"
+                        
+                        val req = Request.Builder().url(urlGet).get().build()
                         val res = client.newCall(req).execute()
                         val resStr = res.body?.string() ?: ""
                         res.close()
 
                         val resJson = JSONObject(resStr)
                         if (resJson.optString("status") == "exito") {
-                            val cod = resJson.getString("codigoTienda")
-                            prefs.edit().putString("codigo_tienda", cod).putString("nombre_tienda", nom).apply()
-                            
+                            prefs.edit().putString("nombre_tienda", nom).putBoolean("excel_listo", true).apply()
                             runOnUiThread {
-                                Toast.makeText(this@MainActivity, "¡Excel creado con éxito!", Toast.LENGTH_SHORT).show()
-                                mostrarPaso(2)
+                                Toast.makeText(this@MainActivity, "¡Excel creado! Te llegó el link a Telegram", Toast.LENGTH_LONG).show()
+                                mostrarPaso(3)
                             }
                         } else {
                             runOnUiThread {
@@ -117,47 +154,13 @@ class MainActivity : Activity() {
             }
         }
 
-        layoutPaso1.addView(t1)
-        layoutPaso1.addView(desc1)
-        layoutPaso1.addView(inputNombre)
-        layoutPaso1.addView(inputCorreo)
-        layoutPaso1.addView(btnPaso1)
-
-        // ================= PASO 2: VINCULAR TELEGRAM =================
-        layoutPaso2 = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        
-        val t2 = TextView(this).apply {
-            text = "PASO 2 DE 3: ¿A qué celular avisamos?"
-            textSize = 17f
-            setTextColor(Color.BLACK)
-            setPadding(0, 0, 0, 10)
-        }
-        val desc2 = TextView(this).apply {
-            text = "Conecta el teléfono personal donde quieres que suenen las alertas cuando estés ausente:"
-            textSize = 13f
-            setPadding(0, 0, 0, 15)
-        }
-        val btnTelegram = Button(this).apply {
-            text = "📲 1. Conectar con Telegram (1 toque)"
-            setBackgroundColor(Color.parseColor("#0088CC"))
-            setTextColor(Color.WHITE)
-            setOnClickListener {
-                val cod = prefs.getString("codigo_tienda", "") ?: ""
-                val url = "https://t.me/$BOT_USERNAME?start=$cod"
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-            }
-        }
-        val btnPaso2 = Button(this).apply {
-            text = "Ya lo vinculé, ir al Paso Final ➡️"
-            setOnClickListener { mostrarPaso(3) }
-        }
-
         layoutPaso2.addView(t2)
         layoutPaso2.addView(desc2)
-        layoutPaso2.addView(btnTelegram)
-        layoutPaso2.addView(btnPaso2)
+        layoutPaso2.addView(inputNombre)
+        layoutPaso2.addView(inputCorreo)
+        layoutPaso2.addView(btnCrearExcel)
 
-        // ================= PASO 3: ACTIVAR LECTOR EN CAJA =================
+        // ================= PASO 3: ACTIVAR EN CAJA =================
         layoutPaso3 = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         
         val t3 = TextView(this).apply {
@@ -181,9 +184,8 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.parseColor("#4CAF50"))
             setTextColor(Color.WHITE)
             setOnClickListener {
-                val cod = prefs.getString("codigo_tienda", "") ?: ""
                 CoroutineScope(Dispatchers.IO).launch {
-                    val json = """{"codigoTienda": "$cod", "nombre": "COBRO DE PRUEBA", "monto": "1.00"}"""
+                    val json = """{"codigoTienda": "$codTienda", "nombre": "COBRO DE PRUEBA", "monto": "1.00"}"""
                     val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
                     val req = Request.Builder().url(SERVIDOR_URL).post(body).build()
                     client.newCall(req).execute().close()
@@ -205,9 +207,8 @@ class MainActivity : Activity() {
 
         setContentView(scroll)
 
-        // Si ya tenía tienda guardada va directo al Paso 3, si es nuevo arranca en Paso 1
-        val codGuardado = prefs.getString("codigo_tienda", "") ?: ""
-        if (codGuardado.isNotEmpty()) {
+        val excelListo = prefs.getBoolean("excel_listo", false)
+        if (excelListo) {
             mostrarPaso(3)
         } else {
             mostrarPaso(1)
