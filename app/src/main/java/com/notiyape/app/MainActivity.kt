@@ -23,18 +23,12 @@ class MainActivity : Activity() {
     private val client = OkHttpClient()
 
     private lateinit var txtEstadoPermiso: TextView
+    private lateinit var inputCodigo: EditText
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
-
-        // Genera código único automático (Ej: T-5482)
-        var codTienda = prefs.getString("codigo_tienda", "") ?: ""
-        if (codTienda.isEmpty()) {
-            codTienda = "T-" + (1000..9999).random()
-            prefs.edit().putString("codigo_tienda", codTienda).apply()
-        }
 
         val scroll = ScrollView(this)
         val layout = LinearLayout(this).apply {
@@ -50,50 +44,67 @@ class MainActivity : Activity() {
             setPadding(0, 0, 0, 15)
         }
 
-        val txtCodigo = TextView(this).apply {
-            text = "Tu Código de Tienda: $codTienda\n"
-            textSize = 16f
+        txtEstadoPermiso = TextView(this).apply {
+            textSize = 15f
+            setPadding(0, 0, 0, 20)
+        }
+
+        val lblCodigo = TextView(this).apply {
+            text = "Código de Tienda (Editable):"
+            textSize = 14f
             setTextColor(Color.BLACK)
         }
 
-        txtEstadoPermiso = TextView(this).apply {
-            textSize = 15f
-            setPadding(0, 0, 0, 25)
+        // CASILLA TOTALMENTE EDITABLE (Viene con TEST-01 por defecto)
+        inputCodigo = EditText(this).apply {
+            setText(prefs.getString("codigo_tienda", "TEST-01"))
         }
 
-        // ================= PASO 1: TELEGRAM =================
+        val btnGuardarCodigo = Button(this).apply {
+            text = "💾 Guardar Código de Tienda"
+            setOnClickListener {
+                val cod = inputCodigo.text.toString().trim()
+                if (cod.isNotEmpty()) {
+                    prefs.edit().putString("codigo_tienda", cod).apply()
+                    Toast.makeText(this@MainActivity, "Guardado: $cod", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this@MainActivity, "Escribe un código válido", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
         val btnTelegram = Button(this).apply {
-            text = "PASO 1: Vincular mi Telegram (1 Toque)"
+            text = "📲 1. Vincular mi Telegram"
             setBackgroundColor(Color.parseColor("#0088CC"))
             setTextColor(Color.WHITE)
             setOnClickListener {
-                val url = "https://t.me/$BOT_USERNAME?start=$codTienda"
+                val cod = inputCodigo.text.toString().trim()
+                val url = "https://t.me/$BOT_USERNAME?start=$cod"
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
             }
         }
 
-        // ================= PASO 2: PERMISO LECTOR =================
         val btnPermiso = Button(this).apply {
-            text = "PASO 2: Activar Lector de Yape"
+            text = "🛡️ 2. Activar Lector de Yape"
             setOnClickListener {
                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
         }
 
-        // ================= PROBAR =================
         val btnTest = Button(this).apply {
             text = "🚀 PROBAR COBRO (Simulación)"
             setBackgroundColor(Color.parseColor("#4CAF50"))
             setTextColor(Color.WHITE)
             setOnClickListener {
+                val cod = inputCodigo.text.toString().trim()
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
-                        val json = """{"codigoTienda": "$codTienda", "nombre": "COBRO DE PRUEBA", "monto": "1.00"}"""
+                        val json = """{"codigoTienda": "$cod", "nombre": "COBRO DE PRUEBA", "monto": "1.00"}"""
                         val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
                         val req = Request.Builder().url(SERVIDOR_URL).post(body).build()
                         client.newCall(req).execute().close()
                         runOnUiThread {
-                            Toast.makeText(this@MainActivity, "¡Enviado! Revisa tu Telegram", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MainActivity, "¡Enviado! Revisa Telegram y Sheets", Toast.LENGTH_SHORT).show()
                         }
                     } catch (e: Exception) {}
                 }
@@ -101,8 +112,10 @@ class MainActivity : Activity() {
         }
 
         layout.addView(titulo)
-        layout.addView(txtCodigo)
         layout.addView(txtEstadoPermiso)
+        layout.addView(lblCodigo)
+        layout.addView(inputCodigo)
+        layout.addView(btnGuardarCodigo)
         layout.addView(btnTelegram)
         layout.addView(btnPermiso)
         layout.addView(btnTest)
