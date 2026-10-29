@@ -7,7 +7,6 @@ import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.speech.tts.TextToSpeech
-import android.speech.tts.Voice
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -15,7 +14,10 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.*
 
 class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitListener {
 
@@ -25,21 +27,26 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
     private var motorVoz: TextToSpeech? = null
     private var vozLista = false
 
-    // Colección de Frases Motivacionales para el Negocio
-    private val frasesMotivacionales = listOf(
-        "¡Excelente! El esfuerzo da frutos, ¡vamos por más ventas!",
-        "¡Plata en mano! Sigue así, el negocio está imparable.",
-        "¡Cobro confirmado! Con fe y trabajo, hoy rompemos récord.",
-        "¡Golazo! Cada sol cuenta, ¡que sigan lloviendo los cobros!",
-        "¡Buen trabajo! Clientes felices, caja llena. ¡A seguir creciendo!",
-        "¡Qué buena venta! Sigue dándole con todo, el éxito es tuyo.",
-        "¡Caja sumando! La constancia es la clave, ¡vamos por el siguiente!",
-        "¡Día productivo! Tu trabajo vale oro, ¡a seguir facturando!"
+    // Frases cortas, humanas y naturales (sin monotonía)
+    private val frasesMotivadoras = listOf(
+        "¡A seguir sumando!",
+        "¡Excelente venta!",
+        "¡Vamos por más!",
+        "¡El negocio está imparable!",
+        "¡Buen trabajo!",
+        "¡Caja sumando!",
+        "¡A seguir facturando!",
+        "¡Qué buena racha!"
     )
 
     override fun onCreate() {
         super.onCreate()
-        motorVoz = TextToSpeech(this, this)
+        // Forzar el motor neuronal de Google para voz humana de alta calidad
+        try {
+            motorVoz = TextToSpeech(this, this, "com.google.android.tts")
+        } catch (e: Exception) {
+            motorVoz = TextToSpeech(this, this)
+        }
     }
 
     override fun onInit(status: Int) {
@@ -47,18 +54,17 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             val locSpanish = Locale("es", "PE")
             motorVoz?.language = locSpanish
             
-            // Ajuste fino para voz más natural y enérgica
-            motorVoz?.setPitch(1.02f)
-            motorVoz?.setSpeechRate(0.98f)
+            // Tono y velocidad optimizados para sonar como persona real
+            motorVoz?.setPitch(1.04f)
+            motorVoz?.setSpeechRate(1.02f)
 
-            // Configurar canal de audio multimedia con máxima prioridad
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
             motorVoz?.setAudioAttributes(audioAttributes)
 
-            // Seleccionar la voz de mayor fidelidad del sistema
+            // Buscar la voz de más alta calidad instalada
             try {
                 val mejorVoz = motorVoz?.voices?.filter {
                     it.locale.language == "es" && !it.name.contains("low")
@@ -90,13 +96,13 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                        ?: extras.getString("android.title") ?: ""
 
             if (text.isNotEmpty()) {
-                val appOrigen = if (esYape) "Yape" else "Plin"
-                procesarPago(text, appOrigen)
+                val metodo = if (esYape) "Yape" else "Plin"
+                procesarPago(text, metodo)
             }
         }
     }
 
-    private fun procesarPago(texto: String, appOrigen: String) {
+    private fun procesarPago(texto: String, metodo: String) {
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
         val codigoTienda = prefs.getString("codigo_tienda", "TEST-01")?.ifEmpty { "TEST-01" } ?: "TEST-01"
 
@@ -119,13 +125,16 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             remitente = texto
         }
 
-        // ================= 3. HABLAR CON ALTO VOLUMEN Y FRASE MOTIVADORA =================
-        hablarEnVozAltaConMotivacion(appOrigen, monto)
+        // 3. Hablar en voz alta humana
+        hablarEnVozAlta(metodo, monto)
 
-        // 4. Enviar a Servidor Central (Telegram + Google Sheets)
+        // 4. Guardar en el historial local del celular para verlo en la app
+        guardarCobroLocal(remitente, monto, metodo)
+
+        // 5. Enviar a Google Sheets y Telegram
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val json = """{"codigoTienda": "$codigoTienda", "nombre": "$remitente ($appOrigen)", "monto": "$monto"}"""
+                val json = """{"codigoTienda": "$codigoTienda", "nombre": "$remitente ($metodo)", "monto": "$monto"}"""
                 val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
                 val request = Request.Builder().url(SERVIDOR_URL).post(body).build()
                 client.newCall(request).execute().close()
@@ -135,33 +144,49 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         }
     }
 
-    private fun hablarEnVozAltaConMotivacion(appOrigen: String, monto: String) {
+    private fun hablarEnVozAlta(metodo: String, monto: String) {
         if (vozLista && motorVoz != null) {
             try {
-                // Subir automáticamente el volumen multimedia al 90% para que suene fuerte
                 val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                val volumenMaximo = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                val volumenDeseado = (volumenMaximo * 0.90).toInt()
-                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, volumenDeseado, 0)
+                val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
             } catch (e: Exception) {}
 
-            // Construir la frase dinámica
-            val fraseCobro = if (monto == "1" || monto == "1.00") {
-                "Te llegó un $appOrigen de un sol."
-            } else {
-                "Te llegó un $appOrigen de $monto soles."
-            }
-
-            // Elegir una frase motivadora al azar
-            val motivacion = frasesMotivacionales.random()
-            val discursoCompleto = "$fraseCobro $motivacion"
+            val fraseMonto = if (monto == "1" || monto == "1.00") "un sol" else "$monto soles"
+            val animo = frasesMotivadoras.random()
+            val discurso = "¡Te llegó un $metodo de $fraseMonto! $animo"
 
             val params = Bundle().apply {
-                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f) // Volumen máximo del motor
+                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
             }
-
-            motorVoz?.speak(discursoCompleto, TextToSpeech.QUEUE_FLUSH, params, "ID_COBRO_VOZ")
+            motorVoz?.speak(discurso, TextToSpeech.QUEUE_FLUSH, params, "ID_TTS")
         }
+    }
+
+    private fun guardarCobroLocal(nombre: String, monto: String, metodo: String) {
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        val historialStr = prefs.getString("historial_cobros", "[]") ?: "[]"
+        val array = JSONArray(historialStr)
+
+        val horaActual = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+        val fechaHoy = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
+
+        val nuevoCobro = JSONObject().apply {
+            put("hora", horaActual)
+            put("fecha", fechaHoy)
+            put("nombre", nombre)
+            put("monto", monto)
+            put("metodo", metodo)
+        }
+
+        // Agregar el nuevo al inicio de la lista
+        val nuevoArray = JSONArray()
+        nuevoArray.put(nuevoCobro)
+        for (i in 0 until minOf(array.length(), 40)) {
+            nuevoArray.put(array.getJSONObject(i))
+        }
+
+        prefs.edit().putString("historial_cobros", nuevoArray.toString()).apply()
     }
 
     override fun onDestroy() {
