@@ -40,13 +40,16 @@ class MainActivity : Activity() {
     private lateinit var layoutListaCobros: LinearLayout
     private lateinit var cardPruebaUnica: LinearLayout
 
+    private lateinit var bannerTienda: TextView
+    private lateinit var bannerCodigo: TextView
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
 
         val scroll = ScrollView(this).apply {
-            setBackgroundColor(Color.parseColor("#F4F6F8")) // Fondo moderno gris claro
+            setBackgroundColor(Color.parseColor("#F4F6F8"))
         }
         
         val mainContainer = LinearLayout(this).apply {
@@ -55,9 +58,7 @@ class MainActivity : Activity() {
         }
         scroll.addView(mainContainer)
 
-        // ========================================================
-        // VENTANA 1: REGISTRO + TIENDA (100% GRATIS)
-        // ========================================================
+        // ================= VENTANA 1: REGISTRO NUEVO =================
         layoutVentana1 = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val card1 = crearTarjeta(this)
 
@@ -98,9 +99,10 @@ class MainActivity : Activity() {
                 return@crearBoton
             }
 
+            // Código único aleatorio fresco para cada registro nuevo
             val codigoGenerado = nom.replace(" ", "").take(5).uppercase() + "-" + (100..999).random()
 
-            Toast.makeText(this@MainActivity, "Registrando negocio y creando tu Excel...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this@MainActivity, "Registrando negocio...", Toast.LENGTH_SHORT).show()
 
             CoroutineScope(Dispatchers.IO).launch {
                 try {
@@ -124,6 +126,8 @@ class MainActivity : Activity() {
                         .putString("correo_tienda", cor)
                         .putString("codigo_tienda", codigoGenerado)
                         .putString("sheet_url_cliente", sheetUrl)
+                        .putBoolean("onboarding_listo", false)
+                        .putBoolean("prueba_realizada", false)
                         .apply()
 
                     runOnUiThread {
@@ -131,7 +135,6 @@ class MainActivity : Activity() {
                     }
                 } catch (e: Exception) {
                     runOnUiThread {
-                        // Fallback de conexión
                         prefs.edit()
                             .putString("nombre_tienda", nom)
                             .putString("correo_tienda", cor)
@@ -151,9 +154,7 @@ class MainActivity : Activity() {
         card1.addView(btnContinuar1)
         layoutVentana1.addView(card1)
 
-        // ========================================================
-        // VENTANA 2: TELEGRAM OBLIGATORIO
-        // ========================================================
+        // ================= VENTANA 2: TELEGRAM =================
         layoutVentana2 = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val card2 = crearTarjeta(this)
 
@@ -198,9 +199,7 @@ class MainActivity : Activity() {
         card2.addView(btnContinuar2)
         layoutVentana2.addView(card2)
 
-        // ========================================================
-        // VENTANA 3: PERMISOS + EXPLICACIÓN
-        // ========================================================
+        // ================= VENTANA 3: PERMISOS =================
         layoutVentana3 = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val card3 = crearTarjeta(this)
 
@@ -232,6 +231,10 @@ class MainActivity : Activity() {
 
         val btnIrDashboard = crearBoton(this, "Entrar a mi Panel de Negocio 🚀", "#00A859") {
             prefs.edit().putBoolean("onboarding_listo", true).apply()
+            val nom = prefs.getString("nombre_tienda", "Mi Negocio")
+            val cod = prefs.getString("codigo_tienda", "")
+            bannerTienda.text = "🏪 $nom"
+            bannerCodigo.text = "Código de Tienda: $cod"
             mostrarVentana(4)
         }
 
@@ -242,24 +245,23 @@ class MainActivity : Activity() {
         card3.addView(btnIrDashboard)
         layoutVentana3.addView(card3)
 
-        // ========================================================
-        // VENTANA 4: PANEL DE CONTROL (DASHBOARD MODERNO)
-        // ========================================================
+        // ================= VENTANA 4: PANEL PRINCIPAL (DASHBOARD) =================
         layoutDashboard = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-
         val cardInfo = crearTarjeta(this)
-        val bannerTienda = TextView(this).apply {
+
+        bannerTienda = TextView(this).apply {
             textSize = 20f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#0F172A"))
         }
-        val bannerCodigo = TextView(this).apply {
+
+        bannerCodigo = TextView(this).apply {
             textSize = 13f
             setTextColor(Color.parseColor("#64748B"))
             setPadding(0, 4, 0, 15)
         }
 
-        // TARJETA DE VERIFICACIÓN (SOLO 1 VEZ, LUEGO DESAPARECE)
+        // Tarjeta de prueba única
         cardPruebaUnica = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = crearBordeRedondo("#EFF6FF", "#BFDBFE", 20f)
@@ -292,7 +294,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     Toast.makeText(this@MainActivity, "✅ ¡Verificación concretada! Revisa tu Telegram y tu Excel.", Toast.LENGTH_LONG).show()
                     prefs.edit().putBoolean("prueba_realizada", true).apply()
-                    cardPruebaUnica.visibility = View.GONE // DESAPARECE PARA SIEMPRE
+                    cardPruebaUnica.visibility = View.GONE
                 }
             }
         }
@@ -300,17 +302,15 @@ class MainActivity : Activity() {
         cardPruebaUnica.addView(dPrueba)
         cardPruebaUnica.addView(btnTestUnico)
 
-        // BOTÓN DIRECTO PARA ABRIR GOOGLE SHEETS
         val btnAbrirSheet = crearBoton(this, "📊 Abrir mi Hoja de Google Sheets en vivo", "#00A859") {
             val url = prefs.getString("sheet_url_cliente", "") ?: ""
             if (url.isNotEmpty()) {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
             } else {
-                Toast.makeText(this@MainActivity, "Tu hoja se abrirá desde el enlace que te dio Telegram", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@MainActivity, "Revisa el enlace que te envió Telegram", Toast.LENGTH_LONG).show()
             }
         }
 
-        // Tarjeta de total del día
         val cardTotal = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = crearBordeRedondo("#ECFDF5", "#A7F3D0", 20f)
@@ -341,6 +341,20 @@ class MainActivity : Activity() {
 
         layoutListaCobros = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
+        // BOTÓN PARA REINICIAR APP Y PROBAR OTRO NEGOCIO DESDE CERO
+        val btnResetTest = Button(this).apply {
+            text = "🔄 Desvincular y Registrar Otro Negocio"
+            setTextColor(Color.parseColor("#DC2626"))
+            setBackgroundColor(Color.TRANSPARENT)
+            textSize = 13f
+            setPadding(0, 40, 0, 20)
+            setOnClickListener {
+                prefs.edit().clear().apply() // Borra toda la memoria de la app
+                Toast.makeText(this@MainActivity, "Memoria borrada. Inicia un nuevo registro.", Toast.LENGTH_SHORT).show()
+                mostrarVentana(1)
+            }
+        }
+
         cardInfo.addView(bannerTienda)
         cardInfo.addView(bannerCodigo)
         cardInfo.addView(cardPruebaUnica)
@@ -348,6 +362,7 @@ class MainActivity : Activity() {
         cardInfo.addView(cardTotal)
         cardInfo.addView(titHistorial)
         cardInfo.addView(layoutListaCobros)
+        cardInfo.addView(btnResetTest)
 
         layoutDashboard.addView(cardInfo)
 
@@ -365,7 +380,6 @@ class MainActivity : Activity() {
             bannerTienda.text = "🏪 $nom"
             bannerCodigo.text = "Código de Tienda: $cod"
 
-            // Si ya hizo la prueba una vez, ocultar la tarjeta
             if (prefs.getBoolean("prueba_realizada", false)) {
                 cardPruebaUnica.visibility = View.GONE
             }
@@ -484,7 +498,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // ================= HELPERS DE DISEÑO MODERNO =================
     private fun crearTarjeta(context: Context): LinearLayout {
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
