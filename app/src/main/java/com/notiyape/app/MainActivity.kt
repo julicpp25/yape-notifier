@@ -13,14 +13,13 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.speech.tts.TextToSpeech
 import android.view.Gravity
 import android.view.View
 import android.widget.*
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -30,11 +29,15 @@ import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.*
 
-class MainActivity : Activity() {
+class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private val BOT_USERNAME = "alertasaudioyape_pe_bot"
     private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbyOiEdKFVc08ti51lu4Q4UT2qAadmiR3D6jIjUxul8coZHtTQNHgUvO-0LzUuu11ewOFQ/exec"
     private val client = OkHttpClient()
+
+    // MOTOR DE VOZ EN EL CELULAR DEL CAJERO
+    private var motorVozCajero: TextToSpeech? = null
+    private var vozLista = false
 
     // VISTAS
     private lateinit var layoutRolSelector: LinearLayout
@@ -44,21 +47,34 @@ class MainActivity : Activity() {
     private lateinit var layoutAdminPanel: LinearLayout
 
     // CAJERO
+    private lateinit var bannerPermisoCajero: LinearLayout
+    private lateinit var txtEstadoPermisoCajero: TextView
     private lateinit var txtInfoCajero: TextView
     private lateinit var imgQr: ImageView
     private lateinit var txtMontoQr: TextView
     private lateinit var switchVozCajero: Switch
-    private lateinit var layoutListaCobros: LinearLayout
+    private lateinit var layoutListaCobrosCajero: LinearLayout
+    private var ultimoIdCobroConocido = -1
+    private var jobSincronizadorCajero: Job? = null
 
     // ADMIN
     private lateinit var txtBannerCodigo: TextView
     private lateinit var txtBannerNombre: TextView
+    private lateinit var txtTotalHoyAdmin: TextView
+    private lateinit var layoutHistorialAdmin: LinearLayout
     private lateinit var layoutListaCajerosAdmin: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+
+        // Inicializar voz en este celular
+        try {
+            motorVozCajero = TextToSpeech(this, this, "com.google.android.tts")
+        } catch (e: Exception) {
+            motorVozCajero = TextToSpeech(this, this)
+        }
 
         val scroll = ScrollView(this).apply {
             setBackgroundColor(Color.parseColor("#F8FAFC"))
@@ -70,7 +86,7 @@ class MainActivity : Activity() {
         scroll.addView(mainContainer)
 
         // =========================================================================
-        // PANTALLA 1: SELECTOR DE ROL (¿Quién usa este celular?)
+        // PANTALLA 1: SELECTOR DE ROL
         // =========================================================================
         layoutRolSelector = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val cardRol = crearTarjeta(this)
@@ -83,7 +99,7 @@ class MainActivity : Activity() {
             setPadding(0, 0, 0, 8)
         }
         val descRol = TextView(this).apply {
-            text = "Selecciona tu perfil en este celular:"
+            text = "Selecciona cómo vas a utilizar este celular:"
             textSize = 14f
             setTextColor(Color.parseColor("#64748B"))
             setPadding(0, 0, 0, 25)
@@ -93,12 +109,12 @@ class MainActivity : Activity() {
             if (prefs.getBoolean("tienda_registrada", false)) {
                 pedirPinDueño(prefs) { mostrarVista(5) }
             } else {
-                mostrarVista(2) // Registrar tienda nueva
+                mostrarVista(2)
             }
         }
 
         val btnSoyCajero = crearBoton(this, "🛒 Soy Cajero (Punto de Venta)", "#00A859") {
-            mostrarVista(3) // Login cajero
+            mostrarVista(3)
         }
 
         cardRol.addView(titRol)
@@ -108,7 +124,7 @@ class MainActivity : Activity() {
         layoutRolSelector.addView(cardRol)
 
         // =========================================================================
-        // PANTALLA 2: REGISTRO DEL DUEÑO (Con llamada al Servidor Central)
+        // PANTALLA 2: REGISTRO DEL DUEÑO
         // =========================================================================
         layoutRegistroDueño = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val cardReg = crearTarjeta(this)
@@ -142,7 +158,6 @@ class MainActivity : Activity() {
             val codGenerado = nom.replace(" ", "").take(5).uppercase() + "-" + (100..999).random()
             Toast.makeText(this, "Registrando tienda y creando Excel...", Toast.LENGTH_SHORT).show()
 
-            // LLAMADA OFICIAL AL SERVIDOR PARA REGISTRAR Y CREAR EXCEL
             CoroutineScope(Dispatchers.IO).launch {
                 var sheetUrl = ""
                 try {
@@ -151,17 +166,15 @@ class MainActivity : Activity() {
                         put("codigoTienda", codGenerado)
                         put("nombreNegocio", nom)
                         put("correo", cor)
+                        put("qrBase", qrRaw)
                     }
                     val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
                     val req = Request.Builder().url(SERVIDOR_URL).post(body).build()
                     val res = client.newCall(req).execute()
-                    val resStr = res.body?.string() ?: ""
+                    val resJson = JSONObject(res.body?.string() ?: "")
                     res.close()
-                    val resJson = JSONObject(resStr)
                     sheetUrl = resJson.optString("sheetUrl", "")
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
+                } catch (e: Exception) {}
 
                 prefs.edit()
                     .putString("nombre_tienda", nom)
@@ -174,7 +187,6 @@ class MainActivity : Activity() {
                     .apply()
 
                 runOnUiThread {
-                    // Abrir Telegram para vincular alertas
                     val urlTelegram = "https://t.me/$BOT_USERNAME?start=$codGenerado"
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(urlTelegram)))
                     Toast.makeText(this@MainActivity, "Tienda registrada: $codGenerado", Toast.LENGTH_LONG).show()
@@ -192,20 +204,20 @@ class MainActivity : Activity() {
         layoutRegistroDueño.addView(cardReg)
 
         // =========================================================================
-        // PANTALLA 3: LOGIN DEL CAJERO (Para el celular de los empleados)
+        // PANTALLA 3: LOGIN DEL CAJERO (EN OTRO CELULAR)
         // =========================================================================
         layoutLoginCajero = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val cardLogin = crearTarjeta(this)
 
         val titLog = TextView(this).apply {
-            text = "Ingreso de Cajero 🛒"
+            text = "Acceso para Cajeros 🛒"
             textSize = 19f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#0F172A"))
             setPadding(0, 0, 0, 15)
         }
 
-        val inCodTienda = crearInput(this, "Código de Tienda (Ej: BODEG-123)").apply {
+        val inCodTienda = crearInput(this, "Código de Tienda (Pídeselo al Dueño)").apply {
             setText(prefs.getString("codigo_tienda", ""))
         }
         val inNomCajero = crearInput(this, "Nombre del Cajero (Ej: Carlos)")
@@ -219,33 +231,52 @@ class MainActivity : Activity() {
             val pin = inPinCajero.text.toString().trim()
 
             if (cod.isEmpty() || caj.isEmpty() || pin.isEmpty()) {
-                Toast.makeText(this, "Completa todos los campos", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Completa todos los datos", Toast.LENGTH_SHORT).show()
                 return@crearBoton
             }
 
-            // Validar contra lista de cajeros o PIN de dueño
-            val listaCajeros = JSONArray(prefs.getString("lista_cajeros", "[]") ?: "[]")
-            var permitido = (pin == prefs.getString("pin_dueño", "1234"))
+            Toast.makeText(this, "Validando con la tienda...", Toast.LENGTH_SHORT).show()
 
-            for (i in 0 until listaCajeros.length()) {
-                val c = listaCajeros.getJSONObject(i)
-                if (c.getString("nombre").equals(caj, true) && c.getString("pin") == pin) {
-                    permitido = true
-                    break
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val json = JSONObject().apply {
+                        put("accion", "login_cajero")
+                        put("codigoTienda", cod)
+                        put("nombreCajero", caj)
+                        put("pinCajero", pin)
+                    }
+                    val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                    val req = Request.Builder().url(SERVIDOR_URL).post(body).build()
+                    val res = client.newCall(req).execute()
+                    val resJson = JSONObject(res.body?.string() ?: "")
+                    res.close()
+
+                    if (resJson.optString("status") == "exito") {
+                        val nomNeg = resJson.optString("nombreNegocio", cod)
+                        val qrDescargado = resJson.optString("qrBase", "")
+
+                        prefs.edit()
+                            .putString("codigo_tienda", cod)
+                            .putString("nombre_tienda", nomNeg)
+                            .putString("cajero_activo", caj)
+                            .putString("qr_base_yape", qrDescargado)
+                            .putBoolean("cajero_logueado", true)
+                            .apply()
+
+                        runOnUiThread {
+                            txtInfoCajero.text = "👤 $caj | Tienda: $nomNeg"
+                            mostrarVista(4)
+                        }
+                    } else {
+                        runOnUiThread {
+                            Toast.makeText(this@MainActivity, "Error: ${resJson.optString("mensaje")}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, "Error de conexión: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
                 }
-            }
-
-            if (permitido) {
-                prefs.edit()
-                    .putString("codigo_tienda", cod)
-                    .putString("cajero_activo", caj)
-                    .putBoolean("cajero_logueado", true)
-                    .apply()
-
-                txtInfoCajero.text = "👤 $caj | Tienda: $cod"
-                mostrarVista(4)
-            } else {
-                Toast.makeText(this, "PIN o Cajero no válido", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -263,10 +294,25 @@ class MainActivity : Activity() {
         layoutLoginCajero.addView(cardLogin)
 
         // =========================================================================
-        // PANTALLA 4: PUNTO DE VENTA (CAJERO CON QR DINÁMICO)
+        // PANTALLA 4: PUNTO DE VENTA (CAJERO: COBRO CON QR + VOZ EN VIVO)
         // =========================================================================
         layoutCajeroPos = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         
+        bannerPermisoCajero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(25, 18, 25, 18)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 15) }
+        }
+        txtEstadoPermisoCajero = TextView(this).apply {
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
+        }
+        bannerPermisoCajero.addView(txtEstadoPermisoCajero)
+
         val barraCaja = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -286,12 +332,13 @@ class MainActivity : Activity() {
             }
         }
         val btnSalirCajero = Button(this).apply {
-            text = "Salir"
-            textSize = 11f
+            text = "Cerrar Turno"
+            textSize = 10f
             setTextColor(Color.WHITE)
             background = crearBordeRedondo("#64748B", "#64748B", 12f)
             setPadding(15, 8, 15, 8)
             setOnClickListener {
+                jobSincronizadorCajero?.cancel()
                 prefs.edit().putBoolean("cajero_logueado", false).apply()
                 mostrarVista(1)
             }
@@ -303,7 +350,7 @@ class MainActivity : Activity() {
         val cardCobro = crearTarjeta(this)
         val inMonto = EditText(this).apply {
             hint = "S/ 0.00"
-            textSize = 26f
+            textSize = 28f
             setTypeface(null, Typeface.BOLD)
             gravity = Gravity.CENTER
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
@@ -325,7 +372,7 @@ class MainActivity : Activity() {
             visibility = View.GONE
         }
 
-        val btnGenerarQr = crearBoton(this, "⚡ Generar QR de Cobro", "#00A859") {
+        val btnGenerarQr = crearBoton(this, "⚡ Generar QR para el Cliente", "#00A859") {
             val monto = inMonto.text.toString().trim()
             if (monto.isEmpty()) {
                 Toast.makeText(this, "Ingresa un monto primero", Toast.LENGTH_SHORT).show()
@@ -334,13 +381,11 @@ class MainActivity : Activity() {
 
             val qrBase = prefs.getString("qr_base_yape", "") ?: ""
             if (qrBase.isEmpty()) {
-                Toast.makeText(this, "El dueño debe configurar el QR oficial en Admin", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "El dueño debe configurar el QR en Admin", Toast.LENGTH_LONG).show()
                 return@crearBoton
             }
 
-            // MOTOR EMVCO BCRP OFICIAL: Convierte a dinámico (12), inserta Tag 54 y calcula CRC16
             val payloadFinal = armarQrEmvcoConMonto(qrBase, monto)
-
             val bmp = generarBitmapQr(payloadFinal, 500, 500)
             if (bmp != null) {
                 imgQr.setImageBitmap(bmp)
@@ -363,21 +408,21 @@ class MainActivity : Activity() {
             setTextColor(Color.parseColor("#0F172A"))
             setPadding(0, 0, 0, 10)
         }
-        layoutListaCobros = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        layoutListaCobrosCajero = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         cardRec.addView(titRec)
-        cardRec.addView(layoutListaCobros)
+        cardRec.addView(layoutListaCobrosCajero)
 
+        layoutCajeroPos.addView(bannerPermisoCajero)
         layoutCajeroPos.addView(barraCaja)
         layoutCajeroPos.addView(cardCobro)
         layoutCajeroPos.addView(cardRec)
 
         // =========================================================================
-        // PANTALLA 5: PANEL ADMINISTRADOR (DUEÑO CON CÓDIGO A LA MANO)
+        // PANTALLA 5: PANEL ADMINISTRADOR (DUEÑO)
         // =========================================================================
         layoutAdminPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val cardAdm = crearTarjeta(this)
 
-        // TARJETA DESTACADA: CÓDIGO DE TIENDA A LA MANO
         val cardCodigoDestacado = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = crearBordeRedondo("#EFF6FF", "#93C5FD", 20f)
@@ -395,7 +440,7 @@ class MainActivity : Activity() {
             setPadding(0, 4, 0, 10)
         }
         val descComparte = TextView(this).apply {
-            text = "Comparte este código con tus cajeros para que inicien sesión desde sus propios celulares:"
+            text = "Código de Tienda para que tus cajeros inicien sesión en sus celulares:"
             textSize = 12f
             setTextColor(Color.parseColor("#3B82F6"))
             setPadding(0, 0, 0, 12)
@@ -425,10 +470,68 @@ class MainActivity : Activity() {
         cardCodigoDestacado.addView(descComparte)
         cardCodigoDestacado.addView(barraBotonesCodigo)
 
+        // TARJETA VENTAS HOY (CONSULTA DENTRO DE LA APP)
+        val cardTotal = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = crearBordeRedondo("#ECFDF5", "#A7F3D0", 18f)
+            setPadding(25, 20, 25, 20)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 15, 0, 15) }
+        }
+        val lblT = TextView(this).apply {
+            text = "VENTAS TOTALES DE HOY"
+            textSize = 11f
+            setTextColor(Color.parseColor("#047857"))
+            setTypeface(null, Typeface.BOLD)
+        }
+        txtTotalHoyAdmin = TextView(this).apply {
+            text = "S/ 0.00"
+            textSize = 28f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#065F46"))
+        }
+        cardTotal.addView(lblT)
+        cardTotal.addView(txtTotalHoyAdmin)
+
         val btnVerSheet = crearBoton(this, "📊 Abrir mi Hoja de Google Sheets en vivo", "#00A859") {
             val url = prefs.getString("sheet_url_cliente", "") ?: ""
             if (url.isNotEmpty()) startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
             else Toast.makeText(this, "Revisa el enlace en tu Telegram", Toast.LENGTH_SHORT).show()
+        }
+
+        // COMPARTIR EN SOLO LECTURA
+        val inCorreoLectura = crearInput(this, "Correo Gmail para darle Solo Lectura")
+        val btnCompartirLectura = crearBoton(this, "🔒 Compartir Reporte en Solo Lectura", "#15803D") {
+            val cor = inCorreoLectura.text.toString().trim()
+            val cod = prefs.getString("codigo_tienda", "") ?: ""
+            if (cor.isEmpty() || !cor.contains("@")) {
+                Toast.makeText(this, "Ingresa un Gmail válido", Toast.LENGTH_SHORT).show()
+                return@crearBoton
+            }
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val json = JSONObject().apply {
+                        put("accion", "compartir_sheet")
+                        put("codigoTienda", cod)
+                        put("correoCompartir", cor)
+                    }
+                    val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                    val req = Request.Builder().url(SERVIDOR_URL).post(body).build()
+                    val res = client.newCall(req).execute()
+                    val resJson = JSONObject(res.body?.string() ?: "")
+                    res.close()
+                    runOnUiThread {
+                        if (resJson.optString("status") == "exito") {
+                            Toast.makeText(this@MainActivity, "Acceso de lectura concedido a $cor", Toast.LENGTH_LONG).show()
+                            inCorreoLectura.setText("")
+                        } else {
+                            Toast.makeText(this@MainActivity, "Error: ${resJson.optString("mensaje")}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } catch (e: Exception) {}
+            }
         }
 
         // GESTIÓN DE CAJEROS
@@ -446,7 +549,21 @@ class MainActivity : Activity() {
         val btnGuardarCaj = crearBoton(this, "➕ Crear Cajero Nuevo", "#0F172A") {
             val n = inNomCaj.text.toString().trim()
             val p = inPinCaj.text.toString().trim()
+            val cod = prefs.getString("codigo_tienda", "") ?: ""
             if (n.isNotEmpty() && p.length >= 4) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val json = JSONObject().apply {
+                            put("accion", "crear_cajero")
+                            put("codigoTienda", cod)
+                            put("nombreCajero", n)
+                            put("pinCajero", p)
+                        }
+                        val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                        val req = Request.Builder().url(SERVIDOR_URL).post(body).build()
+                        client.newCall(req).execute().close()
+                    } catch (e: Exception) {}
+                }
                 agregarCajeroLocal(prefs, n, p)
                 inNomCaj.setText("")
                 inPinCaj.setText("")
@@ -459,22 +576,37 @@ class MainActivity : Activity() {
 
         layoutListaCajerosAdmin = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
+        // CONSULTA DE VENTAS DIRECTAMENTE EN LA APP
+        val titHistAdmin = TextView(this).apply {
+            text = "\n📋 Cobros del Negocio en Tiempo Real:"
+            textSize = 15f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#0F172A"))
+            setPadding(0, 10, 0, 8)
+        }
+        layoutHistorialAdmin = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
         val btnSalirAdmin = Button(this).apply {
             text = "⬅️ Volver al Inicio"
             setOnClickListener { mostrarVista(1) }
         }
 
         cardAdm.addView(cardCodigoDestacado)
+        cardAdm.addView(cardTotal)
         cardAdm.addView(btnVerSheet)
+        cardAdm.addView(inCorreoLectura)
+        cardAdm.addView(btnCompartirLectura)
         cardAdm.addView(titGestCaj)
         cardAdm.addView(inNomCaj)
         cardAdm.addView(inPinCaj)
         cardAdm.addView(btnGuardarCaj)
         cardAdm.addView(layoutListaCajerosAdmin)
+        cardAdm.addView(titHistAdmin)
+        cardAdm.addView(layoutHistorialAdmin)
         cardAdm.addView(btnSalirAdmin)
         layoutAdminPanel.addView(cardAdm)
 
-        // AGREGAR VISTAS AL CONTENEDOR
+        // AGREGAR VISTAS
         mainContainer.addView(layoutRolSelector)
         mainContainer.addView(layoutRegistroDueño)
         mainContainer.addView(layoutLoginCajero)
@@ -498,12 +630,180 @@ class MainActivity : Activity() {
         layoutCajeroPos.visibility = if (vista == 4) View.VISIBLE else View.GONE
         layoutAdminPanel.visibility = if (vista == 5) View.VISIBLE else View.GONE
 
-        if (vista == 4) cargarHistorialCajero()
+        if (vista == 4) {
+            verificarPermisoLector()
+            iniciarSincronizadorCajero()
+        } else {
+            jobSincronizadorCajero?.cancel()
+        }
+
         if (vista == 5) {
             val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
             txtBannerNombre.text = "🏪 " + prefs.getString("nombre_tienda", "Mi Tienda")
             txtBannerCodigo.text = "🔑 " + prefs.getString("codigo_tienda", "NO ASIGNADO")
             recargarListaCajeros(prefs)
+            cargarConsultaAdmin()
+        }
+    }
+
+    // =========================================================================
+    // SINCRONIZADOR EN VIVO (EL CELULAR DEL CAJERO ESCUCHA A LA NUBE Y HABLA)
+    // =========================================================================
+    private fun iniciarSincronizadorCajero() {
+        jobSincronizadorCajero?.cancel()
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        val cod = prefs.getString("codigo_tienda", "") ?: ""
+
+        jobSincronizadorCajero = CoroutineScope(Dispatchers.IO).launch {
+            while (isActive) {
+                try {
+                    val url = "$SERVIDOR_URL?accion=consultar_cobros&codigoTienda=$cod"
+                    val req = Request.Builder().url(url).get().build()
+                    val res = client.newCall(req).execute()
+                    val jsonStr = res.body?.string() ?: "[]"
+                    res.close()
+
+                    val array = JSONArray(jsonStr)
+
+                    if (array.length() > 0) {
+                        val ultimoCobro = array.getJSONObject(0)
+                        val idCobro = ultimoCobro.optInt("id", -1)
+                        val monto = ultimoCobro.optString("monto", "0.00")
+                        val nombre = ultimoCobro.optString("nombre", "Cliente")
+
+                        // Si es la primera vez que sincroniza, fija el último ID sin cantar
+                        if (ultimoIdCobroConocido == -1) {
+                            ultimoIdCobroConocido = idCobro
+                        } else if (idCobro > ultimoIdCobroConocido) {
+                            // ¡PAGO NUEVO DETECTADO EN LA NUBE!
+                            ultimoIdCobroConocido = idCobro
+
+                            withContext(Dispatchers.Main) {
+                                // 1. HABLAR EN VOZ ALTA EN ESTE CELULAR DE CAJA
+                                if (prefs.getBoolean("voz_activa", true) && vozLista) {
+                                    val frase = if (monto == "1" || monto == "1.00") "un sol" else "$monto soles"
+                                    motorVozCajero?.speak("¡Te llegó un Yape de $frase! ¡A seguir sumando!", TextToSpeech.QUEUE_FLUSH, null, "TTS_CAJA")
+                                }
+
+                                // 2. Ocultar el QR generado
+                                imgQr.visibility = View.GONE
+                                txtMontoQr.visibility = View.GONE
+
+                                Toast.makeText(this@MainActivity, "✅ ¡Cobro Confirmado! S/ $monto de $nombre", Toast.LENGTH_LONG).show()
+                            }
+                        }
+
+                        // Actualizar lista en pantalla
+                        withContext(Dispatchers.Main) {
+                            actualizarListaCajero(array)
+                        }
+                    }
+                } catch (e: Exception) {}
+
+                delay(2500) // Consulta cada 2.5 segundos
+            }
+        }
+    }
+
+    private fun actualizarListaCajero(array: JSONArray) {
+        layoutListaCobrosCajero.removeAllViews()
+        for (i in 0 until minOf(array.length(), 10)) {
+            val item = array.getJSONObject(i)
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(15, 12, 15, 12)
+                background = crearBordeRedondo("#FFFFFF", "#E2E8F0", 14f)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { setMargins(0, 0, 0, 8) }
+            }
+            val txtInfo = TextView(this).apply {
+                text = "${item.optString("nombre")} (${item.optString("hora")})"
+                textSize = 13f
+                setTypeface(null, Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val txtMonto = TextView(this).apply {
+                text = "+ S/ ${item.optString("monto")}"
+                textSize = 14f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.parseColor("#00A859"))
+            }
+            row.addView(txtInfo)
+            row.addView(txtMonto)
+            layoutListaCobrosCajero.addView(row)
+        }
+    }
+
+    private fun cargarConsultaAdmin() {
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        val cod = prefs.getString("codigo_tienda", "") ?: ""
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val url = "$SERVIDOR_URL?accion=consultar_cobros&codigoTienda=$cod"
+                val req = Request.Builder().url(url).get().build()
+                val res = client.newCall(req).execute()
+                val jsonStr = res.body?.string() ?: "[]"
+                res.close()
+                val array = JSONArray(jsonStr)
+
+                var total = 0.0
+                val fechaHoy = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
+
+                withContext(Dispatchers.Main) {
+                    layoutHistorialAdmin.removeAllViews()
+                    for (i in 0 until array.length()) {
+                        val item = array.getJSONObject(i)
+                        val mStr = item.optString("monto", "0.00")
+                        val fStr = item.optString("fecha", "")
+
+                        if (fStr == fechaHoy) {
+                            total += mStr.toDoubleOrNull() ?: 0.0
+                        }
+
+                        val row = LinearLayout(this@MainActivity).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            setPadding(15, 10, 15, 10)
+                        }
+                        val tInfo = TextView(this@MainActivity).apply {
+                            text = "${item.optString("nombre")} (${item.optString("hora")})"
+                            textSize = 13f
+                            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                        }
+                        val tM = TextView(this@MainActivity).apply {
+                            text = "+ S/ $mStr"
+                            textSize = 14f
+                            setTypeface(null, Typeface.BOLD)
+                            setTextColor(Color.parseColor("#00A859"))
+                        }
+                        row.addView(tInfo)
+                        row.addView(tM)
+                        layoutHistorialAdmin.addView(row)
+                    }
+                    txtTotalHoyAdmin.text = String.format(Locale.US, "S/ %.2f", total)
+                }
+            } catch (e: Exception) {}
+        }
+    }
+
+    private fun verificarPermisoLector() {
+        val listeners = Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: ""
+        val tienePermiso = listeners.contains(packageName)
+
+        if (tienePermiso) {
+            bannerPermisoCajero.background = crearBordeRedondo("#ECFDF5", "#A7F3D0", 14f)
+            txtEstadoPermisoCajero.text = "🟢 LECTOR DE YAPE ACTIVO Y ESCUCHANDO"
+            txtEstadoPermisoCajero.setTextColor(Color.parseColor("#065F46"))
+            bannerPermisoCajero.setOnClickListener(null)
+        } else {
+            bannerPermisoCajero.background = crearBordeRedondo("#FEF2F2", "#FCA5A5", 14f)
+            txtEstadoPermisoCajero.text = "🔴 ALERTA: Permiso de Yape apagado\nToca aquí para activarlo en Android"
+            txtEstadoPermisoCajero.setTextColor(Color.parseColor("#991B1B"))
+            bannerPermisoCajero.setOnClickListener {
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }
         }
     }
 
@@ -546,7 +846,7 @@ class MainActivity : Activity() {
     }
 
     // =========================================================================
-    // MOTOR EMVCO BCRP OFICIAL (TRANSFORMA A QR DINÁMICO CON MONTO Y CRC16)
+    // MOTOR EMVCO DINÁMICO (YAPE / PLIN)
     // =========================================================================
     private fun armarQrEmvcoConMonto(qrBase: String, montoStr: String): String {
         return try {
@@ -561,15 +861,12 @@ class MainActivity : Activity() {
                     base = base.substring(0, idxCrc)
                 }
 
-                // Cambiar Tag 01 de Estático (11) a Dinámico (12)
                 if (base.contains("010211")) {
                     base = base.replaceFirst("010211", "010212")
                 }
 
-                // Quitar cualquier Tag 54 previo
                 base = base.replace(Regex("54\\d{2}[0-9.]+"), "")
 
-                // Inyectar Tag 54 y recalcular CRC16 con estándar oficial
                 val payloadPreCrc = base + tag54 + "6304"
                 val nuevoCrc = calcularCrc16Oficial(payloadPreCrc)
                 payloadPreCrc + nuevoCrc
@@ -612,42 +909,20 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun cargarHistorialCajero() {
-        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
-        val arr = JSONArray(prefs.getString("historial_cobros", "[]") ?: "[]")
-        layoutListaCobros.removeAllViews()
-
-        if (arr.length() == 0) {
-            layoutListaCobros.addView(TextView(this).apply {
-                text = "Esperando cobros en este turno..."
-                setTextColor(Color.GRAY)
-                textSize = 12f
-                setPadding(0, 20, 0, 20)
-            })
-        } else {
-            for (i in 0 until minOf(arr.length(), 10)) {
-                val item = arr.getJSONObject(i)
-                val row = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    setPadding(15, 12, 15, 12)
-                }
-                val txtInfo = TextView(this).apply {
-                    text = "${item.optString("nombre")} (${item.optString("hora")})"
-                    textSize = 13f
-                    setTypeface(null, Typeface.BOLD)
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                }
-                val txtMonto = TextView(this).apply {
-                    text = "+ S/ ${item.optString("monto")}"
-                    textSize = 14f
-                    setTypeface(null, Typeface.BOLD)
-                    setTextColor(Color.parseColor("#00A859"))
-                }
-                row.addView(txtInfo)
-                row.addView(txtMonto)
-                layoutListaCobros.addView(row)
-            }
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            motorVozCajero?.language = Locale("es", "PE")
+            motorVozCajero?.setPitch(1.04f)
+            motorVozCajero?.setSpeechRate(1.02f)
+            vozLista = true
         }
+    }
+
+    override fun onDestroy() {
+        jobSincronizadorCajero?.cancel()
+        motorVozCajero?.stop()
+        motorVozCajero?.shutdown()
+        super.onDestroy()
     }
 
     private fun crearTarjeta(context: Context): LinearLayout {
