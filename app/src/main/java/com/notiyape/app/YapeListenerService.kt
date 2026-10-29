@@ -127,6 +127,11 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
 
         // 3. Hablar en voz alta humana
         hablarEnVozAlta(metodo, monto)
+        // Verificar si la voz está habilitada por el usuario
+val vozActiva = prefs.getBoolean("voz_activa", true)
+if (vozActiva) {
+    hablarEnVozAlta(metodo, monto)
+}
 
         // 4. Guardar en el historial local del celular para verlo en la app
         guardarCobroLocal(remitente, monto, metodo)
