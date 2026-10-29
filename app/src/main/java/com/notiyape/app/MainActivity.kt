@@ -99,7 +99,6 @@ class MainActivity : Activity() {
                 return@crearBoton
             }
 
-            // Código único aleatorio fresco para cada registro nuevo
             val codigoGenerado = nom.replace(" ", "").take(5).uppercase() + "-" + (100..999).random()
 
             Toast.makeText(this@MainActivity, "Registrando negocio...", Toast.LENGTH_SHORT).show()
@@ -261,7 +260,7 @@ class MainActivity : Activity() {
             setPadding(0, 4, 0, 15)
         }
 
-        // Tarjeta de prueba única
+        // 1. TARJETA DE VERIFICACIÓN (SOLO 1 VEZ)
         cardPruebaUnica = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = crearBordeRedondo("#EFF6FF", "#BFDBFE", 20f)
@@ -302,6 +301,7 @@ class MainActivity : Activity() {
         cardPruebaUnica.addView(dPrueba)
         cardPruebaUnica.addView(btnTestUnico)
 
+        // 2. BOTÓN PARA ABRIR GOOGLE SHEETS
         val btnAbrirSheet = crearBoton(this, "📊 Abrir mi Hoja de Google Sheets en vivo", "#00A859") {
             val url = prefs.getString("sheet_url_cliente", "") ?: ""
             if (url.isNotEmpty()) {
@@ -311,6 +311,82 @@ class MainActivity : Activity() {
             }
         }
 
+        // =========================================================================
+        // 3. NUEVO RÓTULO: COMPARTIR EN MODO SOLO LECTURA CON EL PERSONAL DE CAJA
+        // =========================================================================
+        val cardCompartir = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = crearBordeRedondo("#F0FDF4", "#BBF7D0", 20f)
+            setPadding(30, 25, 30, 25)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 15, 0, 15) }
+        }
+
+        val tCompartir = TextView(this).apply {
+            text = "👥 ACCESO PARA EL PERSONAL DE CAJA"
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#166534"))
+        }
+
+        val dCompartir = TextView(this).apply {
+            text = "Ingresa el correo Gmail de la persona que se queda atendiendo para darle permiso de SOLO LECTURA. Así podrá verificar los cobros en tiempo real desde su celular sin alterar tus datos ni ver tu dinero bancario:"
+            textSize = 12f
+            setTextColor(Color.parseColor("#15803D"))
+            setPadding(0, 6, 0, 15)
+        }
+
+        val inputEmpleado = crearInput(this, "Correo Gmail del empleado (Ej: cajero@gmail.com)")
+
+        val btnCompartir = crearBoton(this, "🔒 Dar Acceso de Solo Lectura", "#15803D") {
+            val correoEmp = inputEmpleado.text.toString().trim()
+            val cod = prefs.getString("codigo_tienda", "") ?: ""
+
+            if (correoEmp.isEmpty() || !correoEmp.contains("@")) {
+                Toast.makeText(this@MainActivity, "Ingresa un correo Gmail válido", Toast.LENGTH_SHORT).show()
+                return@crearBoton
+            }
+
+            Toast.makeText(this@MainActivity, "Asignando permiso de solo lectura...", Toast.LENGTH_SHORT).show()
+
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val json = JSONObject().apply {
+                        put("accion", "compartir_sheet")
+                        put("codigoTienda", cod)
+                        put("correoCompartir", correoEmp)
+                    }
+                    val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                    val req = Request.Builder().url(SERVIDOR_URL).post(body).build()
+                    val res = client.newCall(req).execute()
+                    val resStr = res.body?.string() ?: ""
+                    res.close()
+
+                    val resJson = JSONObject(resStr)
+                    runOnUiThread {
+                        if (resJson.optString("status") == "exito") {
+                            Toast.makeText(this@MainActivity, "✅ ¡Listo! Se le dio acceso de solo lectura a $correoEmp", Toast.LENGTH_LONG).show()
+                            inputEmpleado.setText("")
+                        } else {
+                            Toast.makeText(this@MainActivity, "Error: ${resJson.optString("mensaje")}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } catch(e: Exception) {
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, "Error de conexión: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+
+        cardCompartir.addView(tCompartir)
+        cardCompartir.addView(dCompartir)
+        cardCompartir.addView(inputEmpleado)
+        cardCompartir.addView(btnCompartir)
+
+        // 4. TOTAL VENDIDO HOY
         val cardTotal = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = crearBordeRedondo("#ECFDF5", "#A7F3D0", 20f)
@@ -341,7 +417,6 @@ class MainActivity : Activity() {
 
         layoutListaCobros = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
-        // BOTÓN PARA REINICIAR APP Y PROBAR OTRO NEGOCIO DESDE CERO
         val btnResetTest = Button(this).apply {
             text = "🔄 Desvincular y Registrar Otro Negocio"
             setTextColor(Color.parseColor("#DC2626"))
@@ -349,7 +424,7 @@ class MainActivity : Activity() {
             textSize = 13f
             setPadding(0, 40, 0, 20)
             setOnClickListener {
-                prefs.edit().clear().apply() // Borra toda la memoria de la app
+                prefs.edit().clear().apply()
                 Toast.makeText(this@MainActivity, "Memoria borrada. Inicia un nuevo registro.", Toast.LENGTH_SHORT).show()
                 mostrarVentana(1)
             }
@@ -359,6 +434,7 @@ class MainActivity : Activity() {
         cardInfo.addView(bannerCodigo)
         cardInfo.addView(cardPruebaUnica)
         cardInfo.addView(btnAbrirSheet)
+        cardInfo.addView(cardCompartir) // <-- Nueva tarjeta insertada
         cardInfo.addView(cardTotal)
         cardInfo.addView(titHistorial)
         cardInfo.addView(layoutListaCobros)
