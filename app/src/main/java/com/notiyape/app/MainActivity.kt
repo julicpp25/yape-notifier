@@ -154,7 +154,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
 
             val codGenerado = nom.replace(" ", "").take(5).uppercase() + "-" + (100..999).random()
-            Toast.makeText(this, "Registrando tienda y creando Excel...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Registrando tienda y enviando correo...", Toast.LENGTH_SHORT).show()
 
             CoroutineScope(Dispatchers.IO).launch {
                 var sheetUrl = ""
@@ -293,7 +293,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layoutLoginCajero.addView(cardLogin)
 
         // =========================================================================
-        // PANTALLA 4: PUNTO DE VENTA (CAJERO: QR CORREGIDO + BOTÓN 🔄)
+        // PANTALLA 4: PUNTO DE VENTA (CAJERO CON QR + BOTÓN 🔄)
         // =========================================================================
         layoutCajeroPos = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         
@@ -371,7 +371,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             visibility = View.GONE
         }
 
-        val btnGenerarQr = crearBoton(this, "⚡ Generar QR para el Cliente", "#00A859") {
+        val btnGenerarQr = crearBoton(this, "⚡ Generar QR de Cobro", "#00A859") {
             val monto = inMonto.text.toString().trim()
             if (monto.isEmpty()) {
                 Toast.makeText(this, "Ingresa un monto primero", Toast.LENGTH_SHORT).show()
@@ -384,13 +384,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 return@crearBoton
             }
 
-            // MOTOR EMVCo: Posiciona Tag 54 exactamente después de Tag 53
             val payloadFinal = armarQrEmvcoConMonto(qrBase, monto)
             val bmp = generarBitmapQr(payloadFinal, 500, 500)
             if (bmp != null) {
                 imgQr.setImageBitmap(bmp)
                 imgQr.visibility = View.VISIBLE
-                txtMontoQr.text = "Escanea con Yape/Plin: S/ $monto"
+                txtMontoQr.text = "Monto a pagar: S/ $monto"
                 txtMontoQr.visibility = View.VISIBLE
             }
         }
@@ -438,7 +437,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layoutCajeroPos.addView(cardRec)
 
         // =========================================================================
-        // PANTALLA 5: PANEL ADMINISTRADOR (DUEÑO: SALDO + BOTÓN 🔄)
+        // PANTALLA 5: PANEL ADMINISTRADOR (DUEÑO)
         // =========================================================================
         layoutAdminPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val cardAdm = crearTarjeta(this)
@@ -490,7 +489,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardCodigoDestacado.addView(descComparte)
         cardCodigoDestacado.addView(barraBotonesCodigo)
 
-        // TARJETA VENTAS HOY CON BOTÓN 🔄
         val cardTotal = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = crearBordeRedondo("#ECFDF5", "#A7F3D0", 18f)
@@ -512,7 +510,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         val btnRefreshAdmin = Button(this).apply {
-            text = "🔄 Actualizar Saldo"
+            text = "🔄 Actualizar"
             textSize = 11f
             setTextColor(Color.parseColor("#065F46"))
             background = crearBordeRedondo("#D1FAE5", "#6EE7B7", 12f)
@@ -683,7 +681,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     // =========================================================================
-    // DIÁLOGO DE PIN CON OPCIÓN DE RECUPERACIÓN POR CORREO
+    // DIÁLOGO DE PIN CON BOTÓN DE RECUPERACIÓN POR GMAIL
     // =========================================================================
     private fun pedirPinDueño(prefs: android.content.SharedPreferences, onOk: () -> Unit) {
         val layoutDialog = LinearLayout(this).apply {
@@ -962,73 +960,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // =========================================================================
-    // MOTOR EMVCo: INYECCIÓN ESTRICTA DE MONTO ENTRE TAG 53 Y TAG 58
-    // =========================================================================
     private fun armarQrEmvcoConMonto(qrBase: String, montoStr: String): String {
-        return try {
-            val montoNum = montoStr.replace(",", ".").toDoubleOrNull() ?: return qrBase
-            val montoFormateado = String.format(Locale.US, "%.2f", montoNum)
-            val tag54 = "54" + String.format(Locale.US, "%02d", montoFormateado.length) + montoFormateado
-
-            if (qrBase.startsWith("000201")) {
-                var base = qrBase
-
-                // 1. Quitar el CRC previo
-                val idxCrc = base.lastIndexOf("6304")
-                if (idxCrc != -1) {
-                    base = base.substring(0, idxCrc)
-                }
-
-                // 2. Cambiar Tag 01 de estático (11) a dinámico (12)
-                if (base.contains("010211")) {
-                    base = base.replaceFirst("010211", "010212")
-                }
-
-                // 3. Quitar cualquier Tag 54 anterior
-                base = base.replace(Regex("54\\d{2}[0-9.]+"), "")
-
-                // 4. Inserción reglamentaria: INMEDIATAMENTE después de Tag 53 (5303604)
-                val pos53 = base.indexOf("5303604")
-                if (pos53 != -1) {
-                    val corte = pos53 + "5303604".length
-                    base = base.substring(0, corte) + tag54 + base.substring(corte)
-                } else {
-                    // Fallback: antes de Tag 58 (5802PE)
-                    val pos58 = base.indexOf("5802PE")
-                    if (pos58 != -1) {
-                        base = base.substring(0, pos58) + tag54 + base.substring(pos58)
-                    } else {
-                        base += tag54
-                    }
-                }
-
-                // 5. Agregar Tag 63 y calcular CRC16 oficial
-                val payloadPreCrc = base + "6304"
-                val nuevoCrc = calcularCrc16Oficial(payloadPreCrc)
-                payloadPreCrc + nuevoCrc
-            } else {
-                qrBase
-            }
-        } catch (e: Exception) {
-            qrBase
-        }
-    }
-
-    private fun calcularCrc16Oficial(str: String): String {
-        var crc = 0xFFFF
-        val polynomial = 0x1021
-        val bytes = str.toByteArray(Charsets.UTF_8)
-        for (b in bytes) {
-            val byteVal = b.toInt() and 0xFF
-            for (i in 0 until 8) {
-                val bit = ((byteVal shr (7 - i)) and 1) == 1
-                val c15 = ((crc shr 15) and 1) == 1
-                crc = (crc shl 1) and 0xFFFF
-                if (c15 xor bit) crc = crc xor polynomial
-            }
-        }
-        return String.format(Locale.US, "%04X", crc and 0xFFFF)
+        return qrBase
     }
 
     private fun generarBitmapQr(contenido: String, ancho: Int, alto: Int): Bitmap? {
