@@ -37,8 +37,9 @@ import java.util.*
 
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
-    private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbyOiEdKFVc08ti51lu4Q4UT2qAadmiR3D6jIjUxul8coZHtTQNHgUvO-0LzUuu11ewOFQ/exec"
-    private val NUMERO_SOPORTE_WSP = "51999999999" // Cambia a tu número de WhatsApp de soporte
+    // TU NUEVA URL OFICIAL (noticobros.peru@gmail.com)
+    private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbw0_0UBYuP2yVjPHOmMDyLlehzvT41nuJPPCOnRw2Zd1V1Y57xI2nHUyVI1nSBhR7F_3w/exec"
+    private val NUMERO_SOPORTE_WSP = "51999999999" // Pon tu número de WhatsApp aquí
     private val REQ_GOOGLE_PICKER = 1001
 
     private val client = OkHttpClient()
@@ -56,7 +57,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var tabCajeros: LinearLayout
     private lateinit var tabConfiguracion: LinearLayout
 
-    // BOTONES DE LA BARRA DE PESTAÑAS
+    // BOTONES DE NAVEGACIÓN
     private lateinit var btnTabCaja: Button
     private lateinit var btnTabCajeros: Button
     private lateinit var btnTabConfig: Button
@@ -84,7 +85,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
 
-        // Pedir permiso de Notificaciones Push en Android 13/14
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
@@ -107,7 +107,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         scroll.addView(mainContainer)
 
         // =========================================================================
-        // PANTALLA 1: SELECTOR DE ROL (Inicio)
+        // PANTALLA 1: SELECTOR DE ROL
         // =========================================================================
         layoutRolSelector = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val cardRol = crearTarjeta(this)
@@ -130,12 +130,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             if (prefs.getBoolean("tienda_registrada", false)) {
                 pedirPinDueño(prefs) { mostrarPantallaPrincipal(esDueño = true) }
             } else {
-                mostrarVista(2) // Registrar tienda nueva
+                mostrarVista(2)
             }
         }
 
         val btnSoyCajero = crearBoton(this, "🛒 Soy Cajero (Entrar al Punto de Venta)", "#00A859") {
-            mostrarVista(3) // Login cajero
+            mostrarVista(3)
         }
 
         cardRol.addView(titRol)
@@ -160,7 +160,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val inNom = crearInput(this, "Nombre del Negocio (Ej: Bodega Central)")
 
-        // SELECTOR DE GOOGLE (1 TOQUE)
         inCorreoRegistro = crearInput(this, "Correo Gmail del Dueño")
         val btnGooglePicker = crearBoton(this, "G Seleccionar mi Correo de Google", "#4285F4") {
             try {
@@ -188,7 +187,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
 
             val codGenerado = nom.replace(" ", "").take(5).uppercase() + "-" + (100..999).random()
-            Toast.makeText(this, "Registrando negocio y creando tu hoja de cálculo...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Registrando en noticobros.peru@gmail.com...", Toast.LENGTH_SHORT).show()
 
             CoroutineScope(Dispatchers.IO).launch {
                 var sheetUrl = ""
@@ -223,7 +222,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     .apply()
 
                 runOnUiThread {
-                    Toast.makeText(this@MainActivity, "✅ ¡Tienda creada! Revisa tu correo oficial.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, "✅ ¡Tienda creada! Correo enviado desde noticobros.peru@gmail.com", Toast.LENGTH_LONG).show()
                     mostrarPantallaPrincipal(esDueño = true)
                 }
             }
@@ -331,11 +330,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layoutLoginCajero.addView(cardLogin)
 
         // =========================================================================
-        // PANTALLA 4: APLICACIÓN PRINCIPAL ORGANIZADA EN 3 PESTAÑAS
+        // PANTALLA 4: APLICACIÓN PRINCIPAL (3 PESTAÑAS)
         // =========================================================================
         layoutAppPrincipal = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
-        // BARRA DE NAVEGACIÓN SUPERIOR ENTRE LAS 3 PESTAÑAS
         val barraPestañas = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 0, 0, 15)
@@ -370,9 +368,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         barraPestañas.addView(btnTabConfig)
         layoutAppPrincipal.addView(barraPestañas)
 
-        // -------------------------------------------------------------
-        // PESTAÑA 1: CAJA / POS (Punto de venta)
-        // -------------------------------------------------------------
+        // PESTAÑA 1: CAJA / POS
         tabCajaPOS = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
         val barraSubCaja = LinearLayout(this).apply {
@@ -396,7 +392,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         barraSubCaja.addView(txtInfoCajero)
         barraSubCaja.addView(switchVozCaja)
 
-        // Tarjeta de Ventas de Hoy con botón 🔄
         val cardTotal = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = crearBordeRedondo("#ECFDF5", "#A7F3D0", 18f)
@@ -505,9 +500,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         tabCajaPOS.addView(cardCobroPOS)
         tabCajaPOS.addView(cardHistorialCaja)
 
-        // -------------------------------------------------------------
-        // PESTAÑA 2: CAJEROS (Gestión de turnos)
-        // -------------------------------------------------------------
+        // PESTAÑA 2: CAJEROS
         tabCajeros = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
@@ -594,9 +587,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardCajeros.addView(btnCompartirLectura)
         tabCajeros.addView(cardCajeros)
 
-        // -------------------------------------------------------------
-        // PESTAÑA 3: CONFIGURACIÓN (Dueño / Sistema)
-        // -------------------------------------------------------------
+        // PESTAÑA 3: CONFIGURACIÓN
         tabConfiguracion = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
@@ -641,7 +632,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardCodTienda.addView(txtBannerCodigoConfig)
         cardCodTienda.addView(barraBtnsCod)
 
-        // SEMÁFORO DE LECTURA DE COBROS
         val cardSemaforo = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 16f)
@@ -657,24 +647,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         cardSemaforo.addView(txtSemaforoLector)
 
-        // ACCESO EN 1 CLIC A OPTIMIZACIÓN DE BATERÍA
         val btnBateria = crearBoton(this, "🔋 Desactivar Ahorro de Batería (1 Clic)", "#475569") {
             solicitarSinRestriccionesBateria()
         }
 
-        // CAMBIAR PIN DE DUEÑO
         val btnCambiarPin = crearBoton(this, "🔑 Cambiar mi PIN de Dueño", "#0F172A") {
             dialogCambiarPin(prefs)
         }
 
-        // ABRIR GOOGLE SHEETS
         val btnAbrirSheet = crearBoton(this, "📊 Abrir mi Google Sheets en vivo", "#00A859") {
             val url = prefs.getString("sheet_url_cliente", "") ?: ""
             if (url.isNotEmpty()) startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
             else Toast.makeText(this, "Revisa el enlace enviado a tu correo", Toast.LENGTH_SHORT).show()
         }
 
-        // BOTÓN SOPORTE WHATSAPP
         val btnSoporte = crearBoton(this, "💬 Contactar a Soporte por WhatsApp", "#25D366") {
             val cod = prefs.getString("codigo_tienda", "")
             val nom = prefs.getString("nombre_tienda", "")
