@@ -111,24 +111,22 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         val matchMonto = regexMonto.find(texto)
         val monto = matchMonto?.groups?.get(1)?.value?.replace(",", ".") ?: "0.00"
 
-        // Extraer Remitente
+        // Extraer Remitente (Corregido con comillas vacías)
         var remitente = "Cliente"
         if (texto.contains("te envi", ignoreCase = true) || texto.contains("transfirió", ignoreCase = true) || texto.contains("pago de", ignoreCase = true)) {
             val antes = texto.split(Regex("(te envi[oó]|transfiri[oó]|pago de)", RegexOption.IGNORE_CASE))[0]
-            remitente = antes.replace(Regex("(¡|!|Te llegó un Yape|Yape|Plin)", RegexOption.IGNORE_CASE)).trim()
+            remitente = antes.replace(Regex("(¡|!|Te llegó un Yape|Yape|Plin)", RegexOption.IGNORE_CASE), "").trim()
         } else {
             remitente = texto
         }
         if (remitente.isEmpty()) remitente = "Cliente"
 
-        // Anuncio en voz alta si está activo el interruptor
         if (prefs.getBoolean("voz_activa", true)) {
             hablarEnVozAlta(metodo, monto)
         }
 
         guardarCobroLocal(remitente, monto, metodo)
 
-        // Enviar a la nube (Google Apps Script -> FCM Push + Sheets)
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val json = """{"codigoTienda": "$codigoTienda", "nombre": "$remitente ($metodo)", "monto": "$monto"}"""
