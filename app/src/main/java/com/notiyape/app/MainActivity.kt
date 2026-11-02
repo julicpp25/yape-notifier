@@ -38,13 +38,13 @@ import java.util.*
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbw0_0UBYuP2yVjPHOmMDyLlehzvT41nuJPPCOnRw2Zd1V1Y57xI2nHUyVI1nSBhR7F_3w/exec"
-    private val NUMERO_SOPORTE_WSP = "51999999999" // Cambia a tu número de WhatsApp
-    private val REQ_GOOGLE_PICKER = 1001
+    private val NUMERO_SOPORTE_WSP = "51999999999"
+    private val REQ_GOOGLE_PICKER_REGISTRO = 1001
+    private val REQ_GOOGLE_PICKER_LOGIN = 1002
 
-    // PALETA OFICIAL ESTILO YAPE
-    private val COLOR_YAPE_PURPLE = "#732483"  // Morado Yape Primario
-    private val COLOR_YAPE_CYAN = "#00D2B4"    // Turquesa / Verde Agua Yape
-    private val COLOR_YAPE_BG = "#FAF7FB"      // Fondo suave
+    private val COLOR_YAPE_PURPLE = "#732483"
+    private val COLOR_YAPE_CYAN = "#00D2B4"
+    private val COLOR_YAPE_BG = "#FAF7FB"
 
     private val client = OkHttpClient()
     private var motorVozCajero: TextToSpeech? = null
@@ -53,6 +53,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     // VISTAS PRINCIPALES
     private lateinit var layoutPortada: LinearLayout
     private lateinit var layoutRegistroDueño: LinearLayout
+    private lateinit var layoutLoginDueño: LinearLayout
     private lateinit var layoutLoginCajero: LinearLayout
     private lateinit var layoutBienvenida: LinearLayout
 
@@ -81,8 +82,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var ultimoIdCobroConocido = -1
     private var jobSincronizador: Job? = null
 
-    // ELEMENTOS CONFIGURACIÓN
+    // ELEMENTOS CONFIGURACIÓN Y FORMULARIOS
     private lateinit var inCorreoRegistro: EditText
+    private lateinit var inCorreoLoginDueño: EditText
     private lateinit var txtBannerCodigoConfig: TextView
     private lateinit var txtBannerNombreConfig: TextView
     private lateinit var txtSemaforoLector: TextView
@@ -136,26 +138,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             textSize = 14f
             setTypeface(null, Typeface.ITALIC)
             setTextColor(Color.parseColor("#475569"))
-            setPadding(0, 0, 0, 28)
+            setPadding(0, 0, 0, 24)
         }
 
-        val btnDueñoResaltante = crearBoton(this, "👑 SOY EL DUEÑO\n(Administrador de Negocio)", COLOR_YAPE_PURPLE) {
+        val btnDueño = crearBoton(this, "👑 SOY EL DUEÑO\n(Administrador de Negocio)", COLOR_YAPE_PURPLE) {
             if (prefs.getBoolean("tienda_registrada", false)) {
                 pedirPinDueño(prefs) {
                     esSesionDueño = true
                     verificarAsistentePermisosOEntrar()
                 }
             } else {
-                mostrarSeccion(layoutRegistroDueño)
+                mostrarOpcionesDueñoDialog()
             }
-        }
-
-        val txtSubDueño = TextView(this).apply {
-            text = "Clic aquí para registrarte o iniciar sesión\n"
-            textSize = 12f
-            setTextColor(Color.parseColor("#64748B"))
-            gravity = Gravity.CENTER
-            setPadding(0, 6, 0, 20)
         }
 
         val btnCajeroPequeno = crearBoton(this, "🛒 Soy Cajero (Entrar al Punto de Venta) - Clic aquí", COLOR_YAPE_CYAN) {
@@ -168,13 +162,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         cardPortada.addView(titApp)
         cardPortada.addView(eslogan)
-        cardPortada.addView(btnDueñoResaltante)
-        cardPortada.addView(txtSubDueño)
+        cardPortada.addView(btnDueño)
         cardPortada.addView(btnCajeroPequeno)
         layoutPortada.addView(cardPortada)
 
         // =========================================================================
-        // PANTALLA 2: REGISTRO DE DUEÑO (RÁPIDO, SIN QR)
+        // PANTALLA 2: REGISTRO DE DUEÑO (NUEVO NEGOCIO)
         // =========================================================================
         layoutRegistroDueño = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -193,10 +186,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val inNom = crearInput(this, "Nombre de tu Negocio (Ej: Bodega Central)")
 
         inCorreoRegistro = crearInput(this, "Correo Gmail del Dueño")
-        val btnGooglePicker = crearBoton(this, "G Seleccionar mi Correo de Google", "#4285F4") {
+        val btnGooglePickerReg = crearBoton(this, "G Seleccionar mi Correo de Google", "#4285F4") {
             try {
                 val intent = AccountManager.newChooseAccountIntent(null, null, arrayOf("com.google"), null, null, null, null)
-                startActivityForResult(intent, REQ_GOOGLE_PICKER)
+                startActivityForResult(intent, REQ_GOOGLE_PICKER_REGISTRO)
             } catch (e: Exception) {
                 Toast.makeText(this, "Escribe tu correo manualmente", Toast.LENGTH_SHORT).show()
             }
@@ -226,10 +219,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
 
             val codGenerado = nom.replace(" ", "").take(5).uppercase() + "-" + (100..999).random()
-            Toast.makeText(this, "Registrando negocio y creando tu hoja contable...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Validando registro...", Toast.LENGTH_SHORT).show()
 
             CoroutineScope(Dispatchers.IO).launch {
-                var sheetUrl = ""
                 try {
                     val json = JSONObject().apply {
                         put("accion", "registrar_tienda")
@@ -244,42 +236,193 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     val res = client.newCall(req).execute()
                     val resJson = JSONObject(res.body?.string() ?: "")
                     res.close()
-                    sheetUrl = resJson.optString("sheetUrl", "")
-                } catch (e: Exception) {}
 
-                val topicLimpio = "tienda_" + codGenerado.replace(Regex("[^a-zA-Z0-9-_.~%]"), "_")
-                FirebaseMessaging.getInstance().subscribeToTopic(topicLimpio)
+                    if (resJson.optString("status") == "exito") {
+                        val sheetUrl = resJson.optString("sheetUrl", "")
+                        val topicLimpio = "tienda_" + codGenerado.replace(Regex("[^a-zA-Z0-9-_.~%]"), "_")
+                        FirebaseMessaging.getInstance().subscribeToTopic(topicLimpio)
 
-                prefs.edit()
-                    .putString("nombre_tienda", nom)
-                    .putString("correo_tienda", cor)
-                    .putString("codigo_tienda", codGenerado)
-                    .putString("pin_dueño", p1)
-                    .putString("sheet_url_cliente", sheetUrl)
-                    .putBoolean("tienda_registrada", true)
-                    .apply()
+                        prefs.edit()
+                            .putString("nombre_tienda", nom)
+                            .putString("correo_tienda", cor)
+                            .putString("codigo_tienda", codGenerado)
+                            .putString("pin_dueño", p1)
+                            .putString("sheet_url_cliente", sheetUrl)
+                            .putBoolean("tienda_registrada", true)
+                            .apply()
 
-                runOnUiThread {
-                    esSesionDueño = true
-                    mostrarSeccion(layoutBienvenida)
+                        runOnUiThread {
+                            esSesionDueño = true
+                            mostrarSeccion(layoutBienvenida)
+                        }
+                    } else {
+                        // Error de duplicado u otro
+                        runOnUiThread {
+                            AlertDialog.Builder(this@MainActivity)
+                                .setTitle("Aviso de Registro")
+                                .setMessage(resJson.optString("mensaje"))
+                                .setPositiveButton("Iniciar Sesión") { _, _ ->
+                                    inCorreoLoginDueño.setText(cor)
+                                    mostrarSeccion(layoutLoginDueño)
+                                }
+                                .setNegativeButton("Cerrar", null)
+                                .show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, "Error de red: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }
 
+        val btnYaTengoCuentaLink = Button(this).apply {
+            text = "¿Ya tienes un negocio registrado? Inicia sesión aquí"
+            textSize = 12f
+            setTextColor(Color.parseColor("#2563EB"))
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { mostrarSeccion(layoutLoginDueño) }
+        }
+
         val btnVolverReg = Button(this).apply {
-            text = "⬅️ Volver"
+            text = "⬅️ Volver a la Portada"
             setOnClickListener { mostrarSeccion(layoutPortada) }
         }
 
         cardReg.addView(titReg)
         cardReg.addView(inNom)
-        cardReg.addView(btnGooglePicker)
+        cardReg.addView(btnGooglePickerReg)
         cardReg.addView(inCorreoRegistro)
         cardReg.addView(inPin1)
         cardReg.addView(inPin2)
         cardReg.addView(btnCrearTienda)
+        cardReg.addView(btnYaTengoCuentaLink)
         cardReg.addView(btnVolverReg)
         layoutRegistroDueño.addView(cardReg)
+
+        // =========================================================================
+        // PANTALLA: LOGIN DE DUEÑO (YA TENGO UNA CUENTA)
+        // =========================================================================
+        layoutLoginDueño = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        val cardLoginDueño = crearTarjeta(this)
+
+        val titLogDueño = TextView(this).apply {
+            text = "Iniciar Sesión como Dueño 👑"
+            textSize = 20f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
+            setPadding(0, 0, 0, 15)
+        }
+
+        inCorreoLoginDueño = crearInput(this, "Tu Correo Gmail Registrado")
+        val btnGooglePickerLogin = crearBoton(this, "G Seleccionar mi Correo de Google", "#4285F4") {
+            try {
+                val intent = AccountManager.newChooseAccountIntent(null, null, arrayOf("com.google"), null, null, null, null)
+                startActivityForResult(intent, REQ_GOOGLE_PICKER_LOGIN)
+            } catch (e: Exception) {
+                Toast.makeText(this, "Escribe tu correo manualmente", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        val inPinLoginDueño = crearInput(this, "Tu PIN de Dueño (4 dígitos)").apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        }
+
+        val btnIngresarDueño = crearBoton(this, "Ingresar a mi Negocio 🚀", COLOR_YAPE_PURPLE) {
+            val cor = inCorreoLoginDueño.text.toString().trim()
+            val pin = inPinLoginDueño.text.toString().trim()
+
+            if (cor.isEmpty() || pin.isEmpty()) {
+                Toast.makeText(this, "Completa tu correo y PIN", Toast.LENGTH_SHORT).show()
+                return@crearBoton
+            }
+
+            Toast.makeText(this, "Recuperando datos de tu tienda...", Toast.LENGTH_SHORT).show()
+
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val json = JSONObject().apply {
+                        put("accion", "login_dueño")
+                        put("correo", cor)
+                        put("pinDueño", pin)
+                    }
+                    val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                    val req = Request.Builder().url(SERVIDOR_URL).post(body).build()
+                    val res = client.newCall(req).execute()
+                    val resJson = JSONObject(res.body?.string() ?: "")
+                    res.close()
+
+                    if (resJson.optString("status") == "exito") {
+                        val cod = resJson.getString("codigoTienda")
+                        val nom = resJson.getString("nombreNegocio")
+                        val sheetUrl = resJson.optString("sheetUrl", "")
+                        val qrBase = resJson.optString("qrBase", "")
+                        val cajeros = resJson.optString("cajeros", "[]")
+
+                        val topicLimpio = "tienda_" + cod.replace(Regex("[^a-zA-Z0-9-_.~%]"), "_")
+                        FirebaseMessaging.getInstance().subscribeToTopic(topicLimpio)
+
+                        prefs.edit()
+                            .putString("codigo_tienda", cod)
+                            .putString("nombre_tienda", nom)
+                            .putString("correo_tienda", cor)
+                            .putString("pin_dueño", pin)
+                            .putString("sheet_url_cliente", sheetUrl)
+                            .putString("qr_base_yape", qrBase)
+                            .putString("lista_cajeros", cajeros)
+                            .putBoolean("tienda_registrada", true)
+                            .apply()
+
+                        runOnUiThread {
+                            Toast.makeText(this@MainActivity, "✅ ¡Bienvenido de nuevo, $nom!", Toast.LENGTH_LONG).show()
+                            esSesionDueño = true
+                            verificarAsistentePermisosOEntrar()
+                        }
+                    } else {
+                        runOnUiThread {
+                            Toast.makeText(this@MainActivity, "Error: ${resJson.optString("mensaje")}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, "Error de conexión: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+
+        val btnOlvidoPinLogin = Button(this).apply {
+            text = "¿Olvidaste tu PIN? Recupéralo por correo"
+            textSize = 12f
+            setTextColor(Color.parseColor("#2563EB"))
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener {
+                val cor = inCorreoLoginDueño.text.toString().trim()
+                if (cor.isNotEmpty()) {
+                    solicitarRecuperacionPinPorCorreo(cor)
+                } else {
+                    Toast.makeText(this@MainActivity, "Ingresa tu correo arriba primero", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        val btnVolverLoginDueño = Button(this).apply {
+            text = "⬅️ Volver a la Portada"
+            setOnClickListener { mostrarSeccion(layoutPortada) }
+        }
+
+        cardLoginDueño.addView(titLogDueño)
+        cardLoginDueño.addView(btnGooglePickerLogin)
+        cardLoginDueño.addView(inCorreoLoginDueño)
+        cardLoginDueño.addView(inPinLoginDueño)
+        cardLoginDueño.addView(btnIngresarDueño)
+        cardLoginDueño.addView(btnOlvidoPinLogin)
+        cardLoginDueño.addView(btnVolverLoginDueño)
+        layoutLoginDueño.addView(cardLoginDueño)
 
         // =========================================================================
         // PANTALLA: LOGIN DE CAJERO
@@ -358,7 +501,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     }
                 } catch (e: Exception) {
                     runOnUiThread {
-                        Toast.makeText(this@MainActivity, "Error de conexión: ${e.message}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "Error de red: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -572,8 +715,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 prefs.edit().putBoolean("voz_activa", isChecked).apply()
             }
         }
-        
-        // BOTÓN CERRAR SESIÓN DEL CAJERO
         val btnCerrarSesionCajero = Button(this).apply {
             text = "CERRAR SESIÓN"
             textSize = 10f
@@ -787,7 +928,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardCajeros.addView(btnCompartirLectura)
         tabCajeros.addView(cardCajeros)
 
-        // --- PESTAÑA 3: CONFIGURACIÓN (CON CONFIGURACIÓN DE QR + CERRAR SESIÓN) ---
+        // --- PESTAÑA 3: CONFIGURACIÓN ---
         tabConfiguracion = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
@@ -832,7 +973,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardCodTienda.addView(txtBannerCodigoConfig)
         cardCodTienda.addView(barraBtnsCod)
 
-        // SECCIÓN CONFIGURAR QR DE YAPE DENTRO DE CONFIGURACIÓN
         val cardConfigQr = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = crearBordeRedondo("#F8FAFC", "#E2E8F0", 18f)
@@ -887,7 +1027,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 16f)
             setPadding(20, 16, 20, 16)
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 0, 0, 15)
+                setMargins(0, 15, 0, 15)
             }
         }
         txtSemaforoLector = TextView(this).apply {
@@ -919,7 +1059,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         }
 
-        // BOTÓN CERRAR SESIÓN EN MAYÚSCULAS
         val btnCerrarSesion = Button(this).apply {
             text = "CERRAR SESIÓN"
             setTextColor(Color.parseColor("#DC2626"))
@@ -950,6 +1089,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         mainContainer.addView(layoutPortada)
         mainContainer.addView(layoutRegistroDueño)
+        mainContainer.addView(layoutLoginDueño)
         mainContainer.addView(layoutLoginCajero)
         mainContainer.addView(layoutBienvenida)
         mainContainer.addView(layoutPermiso1Lector)
@@ -973,9 +1113,25 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun mostrarOpcionesDueñoDialog() {
+        val opciones = arrayOf("✨ Registrar Nuevo Negocio", "🔑 Ya tengo una cuenta (Iniciar Sesión)")
+        AlertDialog.Builder(this)
+            .setTitle("Acceso de Dueño 👑")
+            .setItems(opciones) { _, which ->
+                if (which == 0) {
+                    mostrarSeccion(layoutRegistroDueño)
+                } else {
+                    mostrarSeccion(layoutLoginDueño)
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
     private fun mostrarSeccion(layoutVisible: LinearLayout) {
         layoutPortada.visibility = View.GONE
         layoutRegistroDueño.visibility = View.GONE
+        layoutLoginDueño.visibility = View.GONE
         layoutLoginCajero.visibility = View.GONE
         layoutBienvenida.visibility = View.GONE
         layoutPermiso1Lector.visibility = View.GONE
@@ -1104,10 +1260,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQ_GOOGLE_PICKER && resultCode == RESULT_OK && data != null) {
+        if (resultCode == RESULT_OK && data != null) {
             val accountName = data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
             if (!accountName.isNullOrEmpty()) {
-                inCorreoRegistro.setText(accountName)
+                if (requestCode == REQ_GOOGLE_PICKER_REGISTRO) {
+                    inCorreoRegistro.setText(accountName)
+                } else if (requestCode == REQ_GOOGLE_PICKER_LOGIN) {
+                    inCorreoLoginDueño.setText(accountName)
+                }
                 Toast.makeText(this, "Correo seleccionado: $accountName", Toast.LENGTH_SHORT).show()
             }
         }
@@ -1261,26 +1421,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         btnOlvido.setOnClickListener {
             dialog.dismiss()
-            solicitarRecuperacionPin(prefs)
+            val cor = prefs.getString("correo_tienda", "") ?: ""
+            solicitarRecuperacionPinPorCorreo(cor)
         }
 
         dialog.show()
     }
 
-    private fun solicitarRecuperacionPin(prefs: android.content.SharedPreferences) {
-        val cod = prefs.getString("codigo_tienda", "") ?: ""
-        val cor = prefs.getString("correo_tienda", "tu correo registrado")
-
+    private fun solicitarRecuperacionPinPorCorreo(correo: String) {
         AlertDialog.Builder(this)
             .setTitle("Recuperar PIN")
-            .setMessage("¿Deseas enviar tu PIN de administrador a tu correo:\n\n$cor?")
+            .setMessage("¿Deseas enviar tu PIN de administrador a tu correo:\n\n$correo?")
             .setPositiveButton("Enviar Correo") { _, _ ->
                 Toast.makeText(this, "Enviando PIN a tu correo...", Toast.LENGTH_SHORT).show()
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
                         val json = JSONObject().apply {
                             put("accion", "recuperar_pin")
-                            put("codigoTienda", cod)
+                            put("correo", correo)
                         }
                         val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
                         val req = Request.Builder().url(SERVIDOR_URL).post(body).build()
