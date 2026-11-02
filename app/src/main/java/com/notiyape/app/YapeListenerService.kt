@@ -22,8 +22,8 @@ import java.util.*
 class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitListener {
 
     private val client = OkHttpClient()
-    private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbyOiEdKFVc08ti51lu4Q4UT2qAadmiR3D6jIjUxul8coZHtTQNHgUvO-0LzUuu11ewOFQ/exec"
-
+   
+    private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbw0_0UBYuP2yVjPHOmMDyLlehzvT41nuJPPCOnRw2Zd1V1Y57xI2nHUyVI1nSBhR7F_3w/exec"
     private var motorVoz: TextToSpeech? = null
     private var vozLista = false
 
