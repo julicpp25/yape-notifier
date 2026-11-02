@@ -37,27 +37,30 @@ import java.util.*
 
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
-    // TU NUEVA URL OFICIAL (noticobros.peru@gmail.com)
     private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbw0_0UBYuP2yVjPHOmMDyLlehzvT41nuJPPCOnRw2Zd1V1Y57xI2nHUyVI1nSBhR7F_3w/exec"
-    private val NUMERO_SOPORTE_WSP = "51999999999" // Pon tu número de WhatsApp aquí
+    private val NUMERO_SOPORTE_WSP = "51999999999" // Pon tu número de WhatsApp de soporte
     private val REQ_GOOGLE_PICKER = 1001
 
     private val client = OkHttpClient()
     private var motorVozCajero: TextToSpeech? = null
     private var vozLista = false
 
-    // VISTAS PRINCIPALES
-    private lateinit var layoutRolSelector: LinearLayout
+    // PANTALLAS DEL FLUJO DE INGRESO
+    private lateinit var layoutPortada: LinearLayout
     private lateinit var layoutRegistroDueño: LinearLayout
     private lateinit var layoutLoginCajero: LinearLayout
-    private lateinit var layoutAppPrincipal: LinearLayout
+    private lateinit var layoutBienvenida: LinearLayout
 
-    // CONTENEDORES DE LAS 3 PESTAÑAS
+    // ASISTENTE DE PERMISOS (PASO A PASO)
+    private lateinit var layoutPermiso1Lector: LinearLayout
+    private lateinit var layoutPermiso2Alertas: LinearLayout
+    private lateinit var layoutPermiso3Bateria: LinearLayout
+
+    // APLICACIÓN PRINCIPAL (3 PESTAÑAS)
+    private lateinit var layoutAppPrincipal: LinearLayout
     private lateinit var tabCajaPOS: LinearLayout
     private lateinit var tabCajeros: LinearLayout
     private lateinit var tabConfiguracion: LinearLayout
-
-    // BOTONES DE NAVEGACIÓN
     private lateinit var btnTabCaja: Button
     private lateinit var btnTabCajeros: Button
     private lateinit var btnTabConfig: Button
@@ -80,16 +83,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var txtSemaforoLector: TextView
     private lateinit var layoutListaCajerosAdmin: LinearLayout
 
+    // ESTADO DE NAVEGACIÓN
+    private var esSesionDueño = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
-            }
-        }
 
         try {
             motorVozCajero = TextToSpeech(this, this, "com.google.android.tts")
@@ -107,58 +107,78 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         scroll.addView(mainContainer)
 
         // =========================================================================
-        // PANTALLA 1: SELECTOR DE ROL
+        // PANTALLA 1: PORTADA OFICIAL (YapeNegocioVoz)
         // =========================================================================
-        layoutRolSelector = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val cardRol = crearTarjeta(this)
+        layoutPortada = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val cardPortada = crearTarjeta(this)
 
-        val titRol = TextView(this).apply {
-            text = "NotiCobros Perú 🇵🇪"
-            textSize = 24f
+        val titApp = TextView(this).apply {
+            text = "YapeNegocioVoz 🇵🇪"
+            textSize = 26f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#0F172A"))
-            setPadding(0, 0, 0, 6)
-        }
-        val descRol = TextView(this).apply {
-            text = "Cobros por voz, reporte contable y alertas en tiempo real para Yape y Plin."
-            textSize = 13f
-            setTextColor(Color.parseColor("#64748B"))
-            setPadding(0, 0, 0, 20)
+            setPadding(0, 0, 0, 8)
         }
 
-        val btnSoyDueño = crearBoton(this, "👑 Soy el Dueño (Administrar Negocio)", "#0F172A") {
+        val eslogan = TextView(this).apply {
+            text = "“La app gratuita de notificaciones por audio, caja registradora y cuentas al día.”"
+            textSize = 14f
+            setTypeface(null, Typeface.ITALIC)
+            setTextColor(Color.parseColor("#475569"))
+            setPadding(0, 0, 0, 28)
+        }
+
+        val btnDueñoResaltante = crearBoton(this, "👑 SOY EL DUEÑO\n(Administrador de Negocio)", "#0F172A") {
             if (prefs.getBoolean("tienda_registrada", false)) {
-                pedirPinDueño(prefs) { mostrarPantallaPrincipal(esDueño = true) }
+                pedirPinDueño(prefs) {
+                    esSesionDueño = true
+                    verificarAsistentePermisosOEntrar()
+                }
             } else {
-                mostrarVista(2)
+                mostrarSeccion(layoutRegistroDueño)
             }
         }
 
-        val btnSoyCajero = crearBoton(this, "🛒 Soy Cajero (Entrar al Punto de Venta)", "#00A859") {
-            mostrarVista(3)
+        val txtSubDueño = TextView(this).apply {
+            text = "Clic aquí para registrarte o administrar tu negocio\n"
+            textSize = 12f
+            setTextColor(Color.parseColor("#64748B"))
+            gravity = Gravity.CENTER
+            setPadding(0, 6, 0, 20)
         }
 
-        cardRol.addView(titRol)
-        cardRol.addView(descRol)
-        cardRol.addView(btnSoyDueño)
-        cardRol.addView(btnSoyCajero)
-        layoutRolSelector.addView(cardRol)
+        val btnCajeroPequeno = crearBoton(this, "🛒 Soy Cajero (Entrar al Punto de Venta) - Clic aquí", "#00A859") {
+            mostrarSeccion(layoutLoginCajero)
+        }.apply {
+            textSize = 12f
+            setPadding(20, 14, 20, 14)
+        }
+
+        cardPortada.addView(titApp)
+        cardPortada.addView(eslogan)
+        cardPortada.addView(btnDueñoResaltante)
+        cardPortada.addView(txtSubDueño)
+        cardPortada.addView(btnCajeroPequeno)
+        layoutPortada.addView(cardPortada)
 
         // =========================================================================
-        // PANTALLA 2: REGISTRO DEL DUEÑO (Con Selector de Google)
+        // PANTALLA 2: FORMULARIO DE REGISTRO (CON DOBLE PIN)
         // =========================================================================
-        layoutRegistroDueño = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        layoutRegistroDueño = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
         val cardReg = crearTarjeta(this)
 
         val titReg = TextView(this).apply {
-            text = "Registro de Tienda Nueva 👑"
+            text = "Registro de Nuevo Negocio 👑"
             textSize = 19f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#0F172A"))
             setPadding(0, 0, 0, 15)
         }
 
-        val inNom = crearInput(this, "Nombre del Negocio (Ej: Bodega Central)")
+        val inNom = crearInput(this, "Nombre de tu Negocio (Ej: Bodega Central)")
 
         inCorreoRegistro = crearInput(this, "Correo Gmail del Dueño")
         val btnGooglePicker = crearBoton(this, "G Seleccionar mi Correo de Google", "#4285F4") {
@@ -170,24 +190,33 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
         }
 
-        val inPin = crearInput(this, "Crea tu PIN de Dueño (4 dígitos)").apply {
+        val inPin1 = crearInput(this, "Crea tu PIN de Dueño (4 dígitos)").apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        }
+        val inPin2 = crearInput(this, "Confirmar PIN de Dueño (4 dígitos)").apply {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
         }
         val inQrPayload = crearInput(this, "Texto de tu QR de Yape (000201...)")
 
-        val btnCrearTienda = crearBoton(this, "Guardar Tienda y Activar NotiCobros 🚀", "#00A859") {
+        val btnCrearTienda = crearBoton(this, "Crear mi Negocio 🚀", "#00A859") {
             val nom = inNom.text.toString().trim()
             val cor = inCorreoRegistro.text.toString().trim()
-            val pin = inPin.text.toString().trim()
+            val p1 = inPin1.text.toString().trim()
+            val p2 = inPin2.text.toString().trim()
             val qrRaw = inQrPayload.text.toString().trim()
 
-            if (nom.isEmpty() || cor.isEmpty() || pin.length < 4) {
+            if (nom.isEmpty() || cor.isEmpty() || p1.length < 4) {
                 Toast.makeText(this, "Completa todos los campos (PIN mín. 4 números)", Toast.LENGTH_SHORT).show()
                 return@crearBoton
             }
 
+            if (p1 != p2) {
+                Toast.makeText(this, "❌ Los dos PIN ingresados no coinciden", Toast.LENGTH_SHORT).show()
+                return@crearBoton
+            }
+
             val codGenerado = nom.replace(" ", "").take(5).uppercase() + "-" + (100..999).random()
-            Toast.makeText(this, "Registrando en noticobros.peru@gmail.com...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Registrando negocio y creando tu hoja de cálculo...", Toast.LENGTH_SHORT).show()
 
             CoroutineScope(Dispatchers.IO).launch {
                 var sheetUrl = ""
@@ -197,7 +226,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         put("codigoTienda", codGenerado)
                         put("nombreNegocio", nom)
                         put("correo", cor)
-                        put("pinDueño", pin)
+                        put("pinDueño", p1)
                         put("qrBase", qrRaw)
                     }
                     val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
@@ -215,32 +244,42 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     .putString("nombre_tienda", nom)
                     .putString("correo_tienda", cor)
                     .putString("codigo_tienda", codGenerado)
-                    .putString("pin_dueño", pin)
+                    .putString("pin_dueño", p1)
                     .putString("qr_base_yape", qrRaw)
                     .putString("sheet_url_cliente", sheetUrl)
                     .putBoolean("tienda_registrada", true)
                     .apply()
 
                 runOnUiThread {
-                    Toast.makeText(this@MainActivity, "✅ ¡Tienda creada! Correo enviado desde noticobros.peru@gmail.com", Toast.LENGTH_LONG).show()
-                    mostrarPantallaPrincipal(esDueño = true)
+                    esSesionDueño = true
+                    mostrarSeccion(layoutBienvenida)
                 }
             }
+        }
+
+        val btnVolverReg = Button(this).apply {
+            text = "⬅️ Volver"
+            setOnClickListener { mostrarSeccion(layoutPortada) }
         }
 
         cardReg.addView(titReg)
         cardReg.addView(inNom)
         cardReg.addView(btnGooglePicker)
         cardReg.addView(inCorreoRegistro)
-        cardReg.addView(inPin)
+        cardReg.addView(inPin1)
+        cardReg.addView(inPin2)
         cardReg.addView(inQrPayload)
         cardReg.addView(btnCrearTienda)
+        cardReg.addView(btnVolverReg)
         layoutRegistroDueño.addView(cardReg)
 
         // =========================================================================
-        // PANTALLA 3: LOGIN DEL CAJERO
+        // PANTALLA: LOGIN DE CAJERO
         // =========================================================================
-        layoutLoginCajero = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        layoutLoginCajero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
         val cardLogin = crearTarjeta(this)
 
         val titLog = TextView(this).apply {
@@ -301,7 +340,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             .apply()
 
                         runOnUiThread {
-                            mostrarPantallaPrincipal(esDueño = false)
+                            esSesionDueño = false
+                            verificarAsistentePermisosOEntrar()
                         }
                     } else {
                         runOnUiThread {
@@ -318,7 +358,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val btnVolverLogin = Button(this).apply {
             text = "⬅️ Volver"
-            setOnClickListener { mostrarVista(1) }
+            setOnClickListener { mostrarSeccion(layoutPortada) }
         }
 
         cardLogin.addView(titLog)
@@ -330,9 +370,164 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layoutLoginCajero.addView(cardLogin)
 
         // =========================================================================
-        // PANTALLA 4: APLICACIÓN PRINCIPAL (3 PESTAÑAS)
+        // PANTALLA 3: BIENVENIDA POST-REGISTRO
         // =========================================================================
-        layoutAppPrincipal = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        layoutBienvenida = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        val cardBienvenida = crearTarjeta(this)
+
+        val titBv = TextView(this).apply {
+            text = "🎉 ¡Bienvenido a YapeNegocioVoz!"
+            textSize = 22f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#0F172A"))
+            setPadding(0, 0, 0, 10)
+        }
+        val fraseBv = TextView(this).apply {
+            text = "“¡Tu Yape ahora habla y administra tu negocio!”"
+            textSize = 15f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#00A859"))
+            setPadding(0, 0, 0, 15)
+        }
+        val descBv = TextView(this).apply {
+            text = "Configuraremos unos permisos necesarios para empezar a usar la app y garantizar que tus cobros se canten siempre a tiempo sin interrupciones."
+            textSize = 13f
+            setTextColor(Color.parseColor("#475569"))
+            setPadding(0, 0, 0, 25)
+        }
+        val btnIniciarAsistente = crearBoton(this, "Comenzar Configuración ➡️", "#00A859") {
+            mostrarSeccion(layoutPermiso1Lector)
+        }
+
+        cardBienvenida.addView(titBv)
+        cardBienvenida.addView(fraseBv)
+        cardBienvenida.addView(descBv)
+        cardBienvenida.addView(btnIniciarAsistente)
+        layoutBienvenida.addView(cardBienvenida)
+
+        // =========================================================================
+        // ASISTENTE DE PERMISOS (PASO 1: LECTOR DE NOTIFICACIONES)
+        // =========================================================================
+        layoutPermiso1Lector = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        val cardP1 = crearTarjeta(this)
+
+        val titP1 = TextView(this).apply {
+            text = "🔔 Paso 1 de 3: Lector de Notificaciones"
+            textSize = 18f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#0F172A"))
+            setPadding(0, 0, 0, 10)
+        }
+        val descP1 = TextView(this).apply {
+            text = "¿Por qué es necesario?\n\nPermite a YapeNegocioVoz detectar al instante cuando un cliente te yapea o plinea, para cantar el cobro por el altavoz y guardarlo automáticamente en tu hoja de cálculo sin que tengas que pedir capturas de pantalla."
+            textSize = 13f
+            setTextColor(Color.parseColor("#475569"))
+            background = crearBordeRedondo("#F8FAFC", "#E2E8F0", 14f)
+            setPadding(20, 16, 20, 16)
+        }
+        val btnActivarP1 = crearBoton(this, "🛡️ Permitir Lector de Notificaciones (1 Clic)", "#0F172A") {
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
+        val btnSigP1 = crearBoton(this, "Siguiente Paso ➡️", "#00A859") {
+            mostrarSeccion(layoutPermiso2Alertas)
+        }
+
+        cardP1.addView(titP1)
+        cardP1.addView(descP1)
+        cardP1.addView(btnActivarP1)
+        cardP1.addView(btnSigP1)
+        layoutPermiso1Lector.addView(cardP1)
+
+        // =========================================================================
+        // ASISTENTE DE PERMISOS (PASO 2: ALERTAS EN LA BARRA SUPERIOR)
+        // =========================================================================
+        layoutPermiso2Alertas = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        val cardP2 = crearTarjeta(this)
+
+        val titP2 = TextView(this).apply {
+            text = "📲 Paso 2 de 3: Alertas en Pantalla"
+            textSize = 18f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#0F172A"))
+            setPadding(0, 0, 0, 10)
+        }
+        val descP2 = TextView(this).apply {
+            text = "¿Por qué es necesario?\n\nPara que tu teléfono vibre y te muestre la tarjeta del cobro en la barra de notificaciones incluso con la pantalla bloqueada o cuando estés fuera del negocio."
+            textSize = 13f
+            setTextColor(Color.parseColor("#475569"))
+            background = crearBordeRedondo("#F8FAFC", "#E2E8F0", 14f)
+            setPadding(20, 16, 20, 16)
+        }
+        val btnActivarP2 = crearBoton(this, "🔔 Activar Alertas de Notificación", "#0F172A") {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+            } else {
+                Toast.makeText(this, "Las notificaciones ya están activas en tu sistema.", Toast.LENGTH_SHORT).show()
+            }
+        }
+        val btnSigP2 = crearBoton(this, "Siguiente Paso ➡️", "#00A859") {
+            mostrarSeccion(layoutPermiso3Bateria)
+        }
+
+        cardP2.addView(titP2)
+        cardP2.addView(descP2)
+        cardP2.addView(btnActivarP2)
+        cardP2.addView(btnSigP2)
+        layoutPermiso2Alertas.addView(cardP2)
+
+        // =========================================================================
+        // ASISTENTE DE PERMISOS (PASO 3: BATERÍA SIN RESTRICCIONES)
+        // =========================================================================
+        layoutPermiso3Bateria = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        val cardP3 = crearTarjeta(this)
+
+        val titP3 = TextView(this).apply {
+            text = "🔋 Paso 3 de 3: Batería Sin Restricciones"
+            textSize = 18f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#0F172A"))
+            setPadding(0, 0, 0, 10)
+        }
+        val descP3 = TextView(this).apply {
+            text = "¿Por qué es necesario?\n\nMarcas como Samsung, Xiaomi, Huawei o Motorola apagan las aplicaciones en segundo plano para ahorrar batería. Al quitar restricciones, YapeNegocioVoz estará despierta todo el día para cantar y anotar cada venta sin interrupciones."
+            textSize = 13f
+            setTextColor(Color.parseColor("#475569"))
+            background = crearBordeRedondo("#F8FAFC", "#E2E8F0", 14f)
+            setPadding(20, 16, 20, 16)
+        }
+        val btnActivarP3 = crearBoton(this, "⚡ Desactivar Ahorro de Batería (1 Clic)", "#0F172A") {
+            solicitarSinRestriccionesBateria()
+        }
+        val btnFinalizarWizard = crearBoton(this, "¡Todo Listo! Entrar a la App 🚀", "#00A859") {
+            prefs.edit().putBoolean("asistente_permisos_listo", true).apply()
+            entrarDirectoAlSistema()
+        }
+
+        cardP3.addView(titP3)
+        cardP3.addView(descP3)
+        cardP3.addView(btnActivarP3)
+        cardP3.addView(btnFinalizarWizard)
+        layoutPermiso3Bateria.addView(cardP3)
+
+        // =========================================================================
+        // PANTALLA PRINCIPAL ORGANIZADA EN 3 PESTAÑAS (INICIO, CAJEROS, CONFIG)
+        // =========================================================================
+        layoutAppPrincipal = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
 
         val barraPestañas = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -368,7 +563,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         barraPestañas.addView(btnTabConfig)
         layoutAppPrincipal.addView(barraPestañas)
 
-        // PESTAÑA 1: CAJA / POS
+        // --- PESTAÑA 1: CAJA / POS ---
         tabCajaPOS = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
         val barraSubCaja = LinearLayout(this).apply {
@@ -500,7 +695,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         tabCajaPOS.addView(cardCobroPOS)
         tabCajaPOS.addView(cardHistorialCaja)
 
-        // PESTAÑA 2: CAJEROS
+        // --- PESTAÑA 2: CAJEROS ---
         tabCajeros = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
@@ -587,7 +782,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardCajeros.addView(btnCompartirLectura)
         tabCajeros.addView(cardCajeros)
 
-        // PESTAÑA 3: CONFIGURACIÓN
+        // --- PESTAÑA 3: CONFIGURACIÓN ---
         tabConfiguracion = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
@@ -664,7 +859,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val btnSoporte = crearBoton(this, "💬 Contactar a Soporte por WhatsApp", "#25D366") {
             val cod = prefs.getString("codigo_tienda", "")
             val nom = prefs.getString("nombre_tienda", "")
-            val mensaje = "Hola Soporte NotiCobros, necesito ayuda con mi negocio $nom (Código: $cod)."
+            val mensaje = "Hola Soporte YapeNegocioVoz, necesito ayuda con mi negocio $nom (Código: $cod)."
             val url = "https://api.whatsapp.com/send?phone=$NUMERO_SOPORTE_WSP&text=" + Uri.encode(mensaje)
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         }
@@ -678,7 +873,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setOnClickListener {
                 jobSincronizador?.cancel()
                 prefs.edit().putBoolean("cajero_logueado", false).apply()
-                mostrarVista(1)
+                mostrarSeccion(layoutPortada)
             }
         }
 
@@ -695,9 +890,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layoutAppPrincipal.addView(tabCajeros)
         layoutAppPrincipal.addView(tabConfiguracion)
 
-        mainContainer.addView(layoutRolSelector)
+        mainContainer.addView(layoutPortada)
         mainContainer.addView(layoutRegistroDueño)
         mainContainer.addView(layoutLoginCajero)
+        mainContainer.addView(layoutBienvenida)
+        mainContainer.addView(layoutPermiso1Lector)
+        mainContainer.addView(layoutPermiso2Alertas)
+        mainContainer.addView(layoutPermiso3Bateria)
         mainContainer.addView(layoutAppPrincipal)
 
         setContentView(scroll)
@@ -709,40 +908,53 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         if (prefs.getBoolean("cajero_logueado", false)) {
-            mostrarPantallaPrincipal(esDueño = false)
+            esSesionDueño = false
+            entrarDirectoAlSistema()
         } else {
-            mostrarVista(1)
+            mostrarSeccion(layoutPortada)
         }
     }
 
-    private fun mostrarVista(vista: Int) {
-        layoutRolSelector.visibility = if (vista == 1) View.VISIBLE else View.GONE
-        layoutRegistroDueño.visibility = if (vista == 2) View.VISIBLE else View.GONE
-        layoutLoginCajero.visibility = if (vista == 3) View.VISIBLE else View.GONE
-        layoutAppPrincipal.visibility = if (vista == 4) View.VISIBLE else View.GONE
+    private fun mostrarSeccion(layoutVisible: LinearLayout) {
+        layoutPortada.visibility = View.GONE
+        layoutRegistroDueño.visibility = View.GONE
+        layoutLoginCajero.visibility = View.GONE
+        layoutBienvenida.visibility = View.GONE
+        layoutPermiso1Lector.visibility = View.GONE
+        layoutPermiso2Alertas.visibility = View.GONE
+        layoutPermiso3Bateria.visibility = View.GONE
+        layoutAppPrincipal.visibility = View.GONE
 
-        if (vista == 4) {
-            seleccionarPestaña(1)
-            iniciarSincronizador()
+        layoutVisible.visibility = View.VISIBLE
+    }
+
+    private fun verificarAsistentePermisosOEntrar() {
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        val wizardListo = prefs.getBoolean("asistente_permisos_listo", false)
+
+        if (wizardListo) {
+            entrarDirectoAlSistema()
         } else {
-            jobSincronizador?.cancel()
+            mostrarSeccion(layoutPermiso1Lector)
         }
     }
 
-    private fun mostrarPantallaPrincipal(esDueño: Boolean) {
+    private fun entrarDirectoAlSistema() {
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
         val nom = prefs.getString("nombre_tienda", "Mi Tienda")
         val cod = prefs.getString("codigo_tienda", "")
-        val caj = prefs.getString("cajero_activo", if (esDueño) "Dueño (Admin)" else "Cajero")
+        val caj = prefs.getString("cajero_activo", if (esSesionDueño) "Dueño (Admin)" else "Cajero")
 
         txtInfoCajero.text = "🏪 $nom | 👤 $caj"
         txtBannerNombreConfig.text = "🏪 $nom"
         txtBannerCodigoConfig.text = "🔑 $cod"
 
-        btnTabCajeros.visibility = if (esDueño) View.VISIBLE else View.GONE
-        btnTabConfig.visibility = if (esDueño) View.VISIBLE else View.GONE
+        btnTabCajeros.visibility = if (esSesionDueño) View.VISIBLE else View.GONE
+        btnTabConfig.visibility = if (esSesionDueño) View.VISIBLE else View.GONE
 
-        mostrarVista(4)
+        mostrarSeccion(layoutAppPrincipal)
+        seleccionarPestaña(1)
+        iniciarSincronizador()
         recargarListaCajeros(prefs)
     }
 
@@ -792,7 +1004,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
                 }
             } else {
-                Toast.makeText(this, "✅ NotiCobros ya tiene permiso sin restricciones de batería.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "✅ YapeNegocioVoz ya tiene permiso sin restricciones de batería.", Toast.LENGTH_SHORT).show()
             }
         }
     }
