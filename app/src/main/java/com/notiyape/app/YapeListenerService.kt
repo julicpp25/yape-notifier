@@ -23,11 +23,10 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
 
     private val client = OkHttpClient()
     private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbyOiEdKFVc08ti51lu4Q4UT2qAadmiR3D6jIjUxul8coZHtTQNHgUvO-0LzUuu11ewOFQ/exec"
-    
+
     private var motorVoz: TextToSpeech? = null
     private var vozLista = false
 
-    // Frases cortas, humanas y naturales (sin monotonía)
     private val frasesMotivadoras = listOf(
         "¡A seguir sumando!",
         "¡Excelente venta!",
@@ -41,7 +40,6 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
 
     override fun onCreate() {
         super.onCreate()
-        // Forzar el motor neuronal de Google para voz humana de alta calidad
         try {
             motorVoz = TextToSpeech(this, this, "com.google.android.tts")
         } catch (e: Exception) {
@@ -51,10 +49,7 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            val locSpanish = Locale("es", "PE")
-            motorVoz?.language = locSpanish
-            
-            // Tono y velocidad optimizados para sonar como persona real
+            motorVoz?.language = Locale("es", "PE")
             motorVoz?.setPitch(1.04f)
             motorVoz?.setSpeechRate(1.02f)
 
@@ -64,15 +59,11 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                 .build()
             motorVoz?.setAudioAttributes(audioAttributes)
 
-            // Buscar la voz de más alta calidad instalada
             try {
                 val mejorVoz = motorVoz?.voices?.filter {
                     it.locale.language == "es" && !it.name.contains("low")
                 }?.maxByOrNull { it.quality }
-
-                if (mejorVoz != null) {
-                    motorVoz?.voice = mejorVoz
-                }
+                if (mejorVoz != null) motorVoz?.voice = mejorVoz
             } catch (e: Exception) {}
 
             vozLista = true
@@ -84,19 +75,28 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         if (sbn == null) return
 
         val pkg = sbn.packageName
+
+        // DETECCIÓN MULTIBANCO (YAPE + TODOS LOS PLIN DE PERÚ)
         val esYape = (pkg == "com.bcp.innovacxion.yapeapp")
         val esInterbank = (pkg == "pe.com.interbank.mobilebanking")
         val esBBVA = (pkg == "com.bbva.bbvacontigo")
         val esScotiabank = (pkg == "com.scotiabank.peru.pe")
+        val esBanbif = (pkg == "com.banbif.bifmovil")
 
-        if (esYape || esInterbank || esBBVA || esScotiabank) {
+        if (esYape || esInterbank || esBBVA || esScotiabank || esBanbif) {
             val extras = sbn.notification.extras
-            val text = extras.getCharSequence("android.text")?.toString() 
-                       ?: extras.getCharSequence("android.bigText")?.toString() 
-                       ?: extras.getString("android.title") ?: ""
+            val text = extras.getCharSequence("android.text")?.toString()
+                ?: extras.getCharSequence("android.bigText")?.toString()
+                ?: extras.getString("android.title") ?: ""
 
             if (text.isNotEmpty()) {
-                val metodo = if (esYape) "Yape" else "Plin"
+                val metodo = when {
+                    esYape -> "Yape"
+                    esInterbank -> "Plin Interbank"
+                    esBBVA -> "Plin BBVA"
+                    esScotiabank -> "Plin Scotiabank"
+                    else -> "Plin / Transferencia"
+                }
                 procesarPago(text, metodo)
             }
         }
@@ -104,39 +104,31 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
 
     private fun procesarPago(texto: String, metodo: String) {
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
-        val codigoTienda = prefs.getString("codigo_tienda", "TEST-01")?.ifEmpty { "TEST-01" } ?: "TEST-01"
+        val codigoTienda = prefs.getString("codigo_tienda", "") ?: return
 
-        // 1. Extraer Monto
+        // Extraer Monto
         val regexMonto = Regex("""S/\.?\s*([\d]+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
         val matchMonto = regexMonto.find(texto)
         val monto = matchMonto?.groups?.get(1)?.value?.replace(",", ".") ?: "0.00"
 
-        // 2. Extraer Remitente
+        // Extraer Remitente
         var remitente = "Cliente"
-        if (texto.contains("te envi", ignoreCase = true)) {
-            val antesDeEnvio = texto.split(Regex("te envi[oó]", RegexOption.IGNORE_CASE))[0]
-            remitente = antesDeEnvio
-                .replace("¡", "")
-                .replace("!", "")
-                .replace("Te llegó un Yape", "", ignoreCase = true)
-                .replace("Yape", "", ignoreCase = true)
-                .trim()
+        if (texto.contains("te envi", ignoreCase = true) || texto.contains("transfirió", ignoreCase = true) || texto.contains("pago de", ignoreCase = true)) {
+            val antes = texto.split(Regex("(te envi[oó]|transfiri[oó]|pago de)", RegexOption.IGNORE_CASE))[0]
+            remitente = antes.replace(Regex("(¡|!|Te llegó un Yape|Yape|Plin)", RegexOption.IGNORE_CASE)).trim()
         } else {
             remitente = texto
         }
+        if (remitente.isEmpty()) remitente = "Cliente"
 
-        // 3. Hablar en voz alta humana
-        hablarEnVozAlta(metodo, monto)
-        // Verificar si la voz está habilitada por el usuario
-val vozActiva = prefs.getBoolean("voz_activa", true)
-if (vozActiva) {
-    hablarEnVozAlta(metodo, monto)
-}
+        // Anuncio en voz alta si está activo el interruptor
+        if (prefs.getBoolean("voz_activa", true)) {
+            hablarEnVozAlta(metodo, monto)
+        }
 
-        // 4. Guardar en el historial local del celular para verlo en la app
         guardarCobroLocal(remitente, monto, metodo)
 
-        // 5. Enviar a Google Sheets y Telegram
+        // Enviar a la nube (Google Apps Script -> FCM Push + Sheets)
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val json = """{"codigoTienda": "$codigoTienda", "nombre": "$remitente ($metodo)", "monto": "$monto"}"""
@@ -184,11 +176,11 @@ if (vozActiva) {
             put("metodo", metodo)
         }
 
-        // Agregar el nuevo al inicio de la lista
-        val nuevoArray = JSONArray()
-        nuevoArray.put(nuevoCobro)
-        for (i in 0 until minOf(array.length(), 40)) {
-            nuevoArray.put(array.getJSONObject(i))
+        val nuevoArray = JSONArray().apply {
+            put(nuevoCobro)
+            for (i in 0 until minOf(array.length(), 40)) {
+                put(array.getJSONObject(i))
+            }
         }
 
         prefs.edit().putString("historial_cobros", nuevoArray.toString()).apply()
