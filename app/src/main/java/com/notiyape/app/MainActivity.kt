@@ -1,22 +1,26 @@
 package com.notiyape.app
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.view.Gravity
 import android.view.View
 import android.widget.*
+import com.google.firebase.messaging.FirebaseMessaging
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.*
@@ -31,7 +35,6 @@ import java.util.*
 
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
-    private val BOT_USERNAME = "alertasaudioyape_pe_bot"
     private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbyOiEdKFVc08ti51lu4Q4UT2qAadmiR3D6jIjUxul8coZHtTQNHgUvO-0LzUuu11ewOFQ/exec"
     private val client = OkHttpClient()
 
@@ -68,6 +71,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
 
+        // Pedir permiso de Notificaciones Push en Android 13 y 14
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+            }
+        }
+
         try {
             motorVozCajero = TextToSpeech(this, this, "com.google.android.tts")
         } catch (e: Exception) {
@@ -97,7 +107,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setPadding(0, 0, 0, 8)
         }
         val descRol = TextView(this).apply {
-            text = "Selecciona cómo vas a utilizar este celular:"
+            text = "Selecciona tu perfil en este celular:"
             textSize = 14f
             setTextColor(Color.parseColor("#64748B"))
             setPadding(0, 0, 0, 25)
@@ -122,7 +132,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layoutRolSelector.addView(cardRol)
 
         // =========================================================================
-        // PANTALLA 2: REGISTRO DEL DUEÑO
+        // PANTALLA 2: REGISTRO DEL DUEÑO (Push Automático)
         // =========================================================================
         layoutRegistroDueño = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val cardReg = crearTarjeta(this)
@@ -142,7 +152,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         val inQrPayload = crearInput(this, "Texto de tu QR de Yape (000201...)")
 
-        val btnCrearTienda = crearBoton(this, "Guardar Tienda y Crear Excel 🚀", "#00A859") {
+        val btnCrearTienda = crearBoton(this, "Guardar Tienda y Activar Alertas 🚀", "#00A859") {
             val nom = inNom.text.toString().trim()
             val cor = inCor.text.toString().trim()
             val pin = inPin.text.toString().trim()
@@ -154,7 +164,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
 
             val codGenerado = nom.replace(" ", "").take(5).uppercase() + "-" + (100..999).random()
-            Toast.makeText(this, "Registrando tienda y enviando correo...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Registrando tienda y activando alertas push...", Toast.LENGTH_SHORT).show()
 
             CoroutineScope(Dispatchers.IO).launch {
                 var sheetUrl = ""
@@ -175,6 +185,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     sheetUrl = resJson.optString("sheetUrl", "")
                 } catch (e: Exception) {}
 
+                // Suscribir este teléfono al tema Push de la tienda en Firebase
+                val topicLimpio = "tienda_" + codGenerado.replace(Regex("[^a-zA-Z0-9-_.~%]"), "_")
+                FirebaseMessaging.getInstance().subscribeToTopic(topicLimpio)
+
                 prefs.edit()
                     .putString("nombre_tienda", nom)
                     .putString("correo_tienda", cor)
@@ -186,9 +200,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     .apply()
 
                 runOnUiThread {
-                    val urlTelegram = "https://t.me/$BOT_USERNAME?start=$codGenerado"
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(urlTelegram)))
-                    Toast.makeText(this@MainActivity, "Tienda creada. Revisa tu correo.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, "✅ Tienda creada. Revisa tu correo de bienvenida.", Toast.LENGTH_LONG).show()
                     mostrarVista(5)
                 }
             }
@@ -234,7 +246,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 return@crearBoton
             }
 
-            Toast.makeText(this, "Validando con la tienda...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Iniciando turno...", Toast.LENGTH_SHORT).show()
 
             CoroutineScope(Dispatchers.IO).launch {
                 try {
@@ -253,6 +265,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     if (resJson.optString("status") == "exito") {
                         val nomNeg = resJson.optString("nombreNegocio", cod)
                         val qrDescargado = resJson.optString("qrBase", "")
+
+                        // Suscribir el celular del cajero a las alertas push
+                        val topicLimpio = "tienda_" + cod.replace(Regex("[^a-zA-Z0-9-_.~%]"), "_")
+                        FirebaseMessaging.getInstance().subscribeToTopic(topicLimpio)
 
                         prefs.edit()
                             .putString("codigo_tienda", cod)
@@ -293,7 +309,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layoutLoginCajero.addView(cardLogin)
 
         // =========================================================================
-        // PANTALLA 4: PUNTO DE VENTA (CAJERO CON QR + BOTÓN 🔄)
+        // PANTALLA 4: PUNTO DE VENTA (CAJERO CON QR + VOZ + PUSH)
         // =========================================================================
         layoutCajeroPos = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         
@@ -384,8 +400,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 return@crearBoton
             }
 
-            val payloadFinal = armarQrEmvcoConMonto(qrBase, monto)
-            val bmp = generarBitmapQr(payloadFinal, 500, 500)
+            val bmp = generarBitmapQr(qrBase, 500, 500)
             if (bmp != null) {
                 imgQr.setImageBitmap(bmp)
                 imgQr.visibility = View.VISIBLE
@@ -399,7 +414,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardCobro.addView(imgQr)
         cardCobro.addView(txtMontoQr)
 
-        // CABECERA HISTORIAL CAJERO CON BOTÓN 🔄
         val cardRec = crearTarjeta(this)
         val barraRecHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -536,7 +550,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val btnVerSheet = crearBoton(this, "📊 Abrir mi Hoja de Google Sheets en vivo", "#00A859") {
             val url = prefs.getString("sheet_url_cliente", "") ?: ""
             if (url.isNotEmpty()) startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-            else Toast.makeText(this, "Revisa el enlace en tu Telegram", Toast.LENGTH_SHORT).show()
+            else Toast.makeText(this, "Revisa el enlace enviado a tu correo", Toast.LENGTH_SHORT).show()
         }
 
         val inCorreoLectura = crearInput(this, "Correo Gmail para darle Solo Lectura")
@@ -649,6 +663,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         setContentView(scroll)
 
+        val codGuardado = prefs.getString("codigo_tienda", "") ?: ""
+        if (codGuardado.isNotEmpty()) {
+            val topicLimpio = "tienda_" + codGuardado.replace(Regex("[^a-zA-Z0-9-_.~%]"), "_")
+            FirebaseMessaging.getInstance().subscribeToTopic(topicLimpio)
+        }
+
         if (prefs.getBoolean("cajero_logueado", false)) {
             txtInfoCajero.text = "👤 " + prefs.getString("cajero_activo", "") + " | Tienda: " + prefs.getString("codigo_tienda", "")
             mostrarVista(4)
@@ -680,9 +700,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // =========================================================================
-    // DIÁLOGO DE PIN CON BOTÓN DE RECUPERACIÓN POR GMAIL
-    // =========================================================================
     private fun pedirPinDueño(prefs: android.content.SharedPreferences, onOk: () -> Unit) {
         val layoutDialog = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -958,10 +975,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 setPadding(0, 4, 0, 4)
             })
         }
-    }
-
-    private fun armarQrEmvcoConMonto(qrBase: String, montoStr: String): String {
-        return qrBase
     }
 
     private fun generarBitmapQr(contenido: String, ancho: Int, alto: Int): Bitmap? {
