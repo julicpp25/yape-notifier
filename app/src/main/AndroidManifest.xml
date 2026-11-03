@@ -10,7 +10,7 @@
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher"
-        android:label="YAPENEGOCIOSVOZ"
+        android:label="YapeAlDía"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.Light">
 
