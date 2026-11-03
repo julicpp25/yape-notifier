@@ -15,6 +15,10 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
+import android.media.AudioManager
+import android.media.ToneGenerator
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -41,10 +45,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbw0_0UBYuP2yVjPHOmMDyLlehzvT41nuJPPCOnRw2Zd1V1Y57xI2nHUyVI1nSBhR7F_3w/exec"
     private val NUMERO_SOPORTE_WSP = "51999999999" // Cambia a tu número de WhatsApp
+    private val URL_POLITICA_PRIVACIDAD = "https://noticobros.peru@gmail.com" // Enlace a tu política
     private val REQ_GOOGLE_PICKER_REGISTRO = 1001
     private val REQ_GOOGLE_PICKER_LOGIN = 1002
 
-    // PALETA FINTECH OFICIAL YAPE
     private val COLOR_YAPE_PURPLE = "#732483"
     private val COLOR_YAPE_CYAN = "#00D2B4"
     private val COLOR_BG = "#F8FAFC"
@@ -52,6 +56,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val client = OkHttpClient()
     private var motorVozCajero: TextToSpeech? = null
     private var vozLista = false
+
+    // BARRA DE AVISO DE INTERNET
+    private lateinit var bannerSinInternet: TextView
 
     // PANTALLAS
     private lateinit var layoutPortada: LinearLayout
@@ -65,7 +72,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var layoutPermiso2Alertas: LinearLayout
     private lateinit var layoutPermiso3Bateria: LinearLayout
 
-    // CONTENEDOR PRINCIPAL CON BARRA INFERIOR FLOTANTE
+    // CONTENEDOR PRINCIPAL Y PESTAÑAS
     private lateinit var layoutAppPrincipal: RelativeLayout
     private lateinit var scrollPrincipal: ScrollView
     private lateinit var tabCajaPOS: LinearLayout
@@ -83,9 +90,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var txtMontoQrPOS: TextView
     private lateinit var switchVozCaja: Switch
     private lateinit var txtTotalHoyCaja: TextView
+    private lateinit var btnOcultarSaldo: Button
     private lateinit var layoutListaCobrosCaja: LinearLayout
     private var ultimoIdCobroConocido = -1
     private var jobSincronizador: Job? = null
+
+    // ESTADO DE PRIVACIDAD Y TOTALES
+    private var saldoOculto = false
+    private var totalVentasHoyNumero = 0.0
+    private var cantidadVentasHoy = 0
 
     // ELEMENTOS CONFIGURACIÓN Y CAJEROS
     private lateinit var inCorreoRegistro: EditText
@@ -118,28 +131,36 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setBackgroundColor(Color.parseColor(COLOR_BG))
         }
 
+        // BARRA INTELIGENTE DE CONEXIÓN A INTERNET (SUPERIOR)
+        bannerSinInternet = TextView(this).apply {
+            text = "⚠️ Sin conexión a internet. Los cobros se actualizarán al reconectar."
+            textSize = 12f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#78350F"))
+            setBackgroundColor(Color.parseColor("#FEF3C7"))
+            gravity = Gravity.CENTER
+            setPadding(20, 10, 20, 10)
+            visibility = View.GONE
+        }
+
         val scrollOnboarding = ScrollView(this)
         val containerOnboarding = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(35, 40, 35, 40)
+            setPadding(35, 30, 35, 40)
         }
         scrollOnboarding.addView(containerOnboarding)
 
         // =========================================================================
-        // PANTALLA 1: PORTADA OFICIAL (CON EL LOGO HORIZONTAL EN ALTA RESOLUCIÓN)
+        // PANTALLA 1: PORTADA OFICIAL (YAPENEGOCIOSVOZ)
         // =========================================================================
         layoutPortada = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val cardPortada = crearTarjetaFintech(this)
 
-        // BANNER CON EL LOGO CORPORATIVO
         val imgBannerPortada = ImageView(this).apply {
             setImageResource(R.drawable.logo_horizontal)
             adjustViewBounds = true
             scaleType = ImageView.ScaleType.FIT_CENTER
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                 setMargins(0, 10, 0, 25)
             }
         }
@@ -168,7 +189,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layoutPortada.addView(cardPortada)
 
         // =========================================================================
-        // PANTALLA 2: REGISTRO DE DUEÑO (RÁPIDO, DOBLE PIN)
+        // PANTALLA 2: REGISTRO DE DUEÑO
         // =========================================================================
         layoutRegistroDueño = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardReg = crearTarjetaFintech(this)
@@ -512,7 +533,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layoutLoginCajero.addView(cardLogin)
 
         // =========================================================================
-        // PANTALLA 3: BIENVENIDA (CON EL BANNER HORIZONTAL)
+        // PANTALLA 3: BIENVENIDA
         // =========================================================================
         layoutBienvenida = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardBienvenida = crearTarjetaFintech(this)
@@ -521,10 +542,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setImageResource(R.drawable.logo_horizontal)
             adjustViewBounds = true
             scaleType = ImageView.ScaleType.FIT_CENTER
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                 setMargins(0, 0, 0, 20)
             }
         }
@@ -669,7 +687,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layoutAppPrincipal = RelativeLayout(this).apply { visibility = View.GONE }
 
         scrollPrincipal = ScrollView(this).apply {
-            setPadding(30, 20, 30, 170)
+            setPadding(30, 10, 30, 170)
             clipToPadding = false
         }
         val containerTabs = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -712,6 +730,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         barraSubCaja.addView(switchVozCaja)
         barraSubCaja.addView(btnCerrarSesionCajero)
 
+        // TARJETA VENTAS HOY CON OJITO 👁️ Y BOTÓN 🔄
         val cardTotal = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = crearBordeRedondo("#F3E8F7", "#D8B4E2", 20f)
@@ -732,18 +751,28 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setTypeface(null, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
-        val btnRefreshCaja = Button(this).apply {
-            text = "🔄 Actualizar"
-            textSize = 11f
-            setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
+        btnOcultarSaldo = Button(this).apply {
+            text = "👁️"
+            textSize = 13f
             background = crearBordeRedondo("#FFFFFF", "#D8B4E2", 14f)
-            setPadding(16, 8, 16, 8)
+            setPadding(12, 6, 12, 6)
+            setOnClickListener {
+                saldoOculto = !saldoOculto
+                actualizarVistaSaldo()
+            }
+        }
+        val btnRefreshCaja = Button(this).apply {
+            text = "🔄"
+            textSize = 13f
+            background = crearBordeRedondo("#FFFFFF", "#D8B4E2", 14f)
+            setPadding(12, 6, 12, 6)
             setOnClickListener {
                 Toast.makeText(this@MainActivity, "Actualizando saldo...", Toast.LENGTH_SHORT).show()
                 consultarCobrosServidorUnaVez()
             }
         }
         barraTotalHeader.addView(lblT)
+        barraTotalHeader.addView(btnOcultarSaldo)
         barraTotalHeader.addView(btnRefreshCaja)
 
         txtTotalHoyCaja = TextView(this).apply {
@@ -788,7 +817,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
             val qrBase = prefs.getString("qr_base_yape", "") ?: ""
             if (qrBase.isEmpty()) {
-                Toast.makeText(this, "Configura tu QR de Yape en la pestaña Cajeros", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "El dueño debe configurar el QR en la pestaña Cajeros", Toast.LENGTH_LONG).show()
                 return@crearBotonFintech
             }
             val bmp = generarBitmapQr(qrBase, 500, 500)
@@ -813,8 +842,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setPadding(0, 0, 0, 10)
         }
         layoutListaCobrosCaja = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
+        // BOTÓN COMPARTIR CUADRE POR WHATSAPP
+        val btnCompartirCuadreWsp = crearBotonFintech(this, "📲 Enviar Cuadre de Caja por WhatsApp", "#25D366") {
+            enviarCuadrePorWhatsApp()
+        }
+
         cardHistorialCaja.addView(titHist)
         cardHistorialCaja.addView(layoutListaCobrosCaja)
+        cardHistorialCaja.addView(btnCompartirCuadreWsp)
 
         tabCajaPOS.addView(barraSubCaja)
         tabCajaPOS.addView(cardTotal)
@@ -971,8 +1007,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setBackgroundColor(Color.TRANSPARENT)
             setPadding(0, 0, 0, 8)
             setOnClickListener {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=como+obtener+texto+codigo+qr+yape"))
-                startActivity(intent)
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=como+obtener+texto+codigo+qr+yape")))
             }
         }
         inQrConfigTabCajeros = crearInputFintech(this, "Pega aquí el texto de tu QR (000201...)").apply {
@@ -994,7 +1029,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardConfigQr.addView(btnGuardarQr)
         tabCajeros.addView(cardConfigQr)
 
-        // --- PESTAÑA 3: CONFIGURACIÓN ---
+        // --- PESTAÑA 3: CONFIGURACIÓN (CON TEST DE SONIDO Y PRIVACIDAD) ---
         tabConfiguracion = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardConfig = crearTarjetaFintech(this)
 
@@ -1013,6 +1048,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         cardSemaforo.addView(txtSemaforoLector)
 
+        // BOTÓN PROBAR VOLUMEN Y AUDIO DE CAJA
+        val btnProbarAudio = crearBotonFintech(this, "🔊 Probar Volumen y Audio de Caja", COLOR_YAPE_CYAN) {
+            probarAudioCaja()
+        }.apply { setTextColor(Color.parseColor("#0F172A")) }
+
         val btnBateria = crearBotonFintech(this, "⚡ Optimizar para Segundo Plano (1 Clic)", "#475569") {
             solicitarSinRestriccionesBateria()
         }
@@ -1021,11 +1061,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             dialogCambiarPin(prefs)
         }
 
-        val btnAbrirSheet = crearBotonFintech(this, "📊 Abrir mi Google Sheets en vivo", COLOR_YAPE_CYAN) {
+        val btnAbrirSheet = crearBotonFintech(this, "📊 Abrir mi Google Sheets en vivo", COLOR_YAPE_PURPLE) {
             val url = prefs.getString("sheet_url_cliente", "") ?: ""
             if (url.isNotEmpty()) startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
             else Toast.makeText(this, "Revisa el enlace enviado a tu correo", Toast.LENGTH_SHORT).show()
-        }.apply { setTextColor(Color.parseColor("#0F172A")) }
+        }
 
         val btnSoporte = crearBotonFintech(this, "💬 Contactar a Soporte por WhatsApp", "#25D366") {
             val cod = prefs.getString("codigo_tienda", "")
@@ -1035,13 +1075,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         }
 
+        // ENLACE A POLÍTICA DE PRIVACIDAD (GOOGLE PLAY COMPLIANCE)
+        val btnPoliticaPrivacidad = Button(this).apply {
+            text = "📄 Política de Privacidad y Seguridad"
+            setTextColor(Color.parseColor("#2563EB"))
+            setBackgroundColor(Color.TRANSPARENT)
+            textSize = 13f
+            setOnClickListener {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(URL_POLITICA_PRIVACIDAD)))
+            }
+        }
+
         val btnCerrarSesion = Button(this).apply {
             text = "CERRAR SESIÓN"
             setTextColor(Color.parseColor("#DC2626"))
             setBackgroundColor(Color.TRANSPARENT)
             textSize = 13f
             setTypeface(null, Typeface.BOLD)
-            setPadding(0, 30, 0, 10)
+            setPadding(0, 20, 0, 10)
             setOnClickListener {
                 jobSincronizador?.cancel()
                 prefs.edit().putBoolean("cajero_logueado", false).apply()
@@ -1050,10 +1101,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         cardConfig.addView(cardSemaforo)
+        cardConfig.addView(btnProbarAudio)
         cardConfig.addView(btnBateria)
         cardConfig.addView(btnCambiarPin)
         cardConfig.addView(btnAbrirSheet)
         cardConfig.addView(btnSoporte)
+        cardConfig.addView(btnPoliticaPrivacidad)
         cardConfig.addView(btnCerrarSesion)
         tabConfiguracion.addView(cardConfig)
 
@@ -1115,9 +1168,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         containerOnboarding.addView(layoutPermiso2Alertas)
         containerOnboarding.addView(layoutPermiso3Bateria)
 
-        rootLayout.addView(scrollOnboarding)
-        rootLayout.addView(layoutAppPrincipal)
+        val rootVertical = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        rootVertical.addView(bannerSinInternet)
+        rootVertical.addView(scrollOnboarding)
+        rootVertical.addView(layoutAppPrincipal)
 
+        rootLayout.addView(rootVertical)
         setContentView(rootLayout)
 
         val codGuardado = prefs.getString("codigo_tienda", "") ?: ""
@@ -1200,6 +1258,65 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         btnNavConfig.setTextColor(if (pestaña == 3) Color.WHITE else Color.parseColor("#64748B"))
 
         if (pestaña == 3) verificarSemaforoLector()
+    }
+
+    private fun actualizarVistaSaldo() {
+        if (saldoOculto) {
+            txtTotalHoyCaja.text = "S/ ••••••"
+            btnOcultarSaldo.text = "👁️‍🗨️"
+        } else {
+            txtTotalHoyCaja.text = String.format(Locale.US, "S/ %.2f", totalVentasHoyNumero)
+            btnOcultarSaldo.text = "👁️"
+        }
+    }
+
+    private fun verificarConexionInternet(): Boolean {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val net = cm.activeNetwork ?: return false
+            val cap = cm.getNetworkCapabilities(net) ?: return false
+            return cap.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        }
+        @Suppress("DEPRECATION")
+        return cm.activeNetworkInfo?.isConnected ?: false
+    }
+
+    private fun probarAudioCaja() {
+        CoroutineScope(Dispatchers.Default).launch {
+            try {
+                val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
+
+                val toneG = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
+                toneG.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
+                delay(220)
+                toneG.release()
+            } catch (e: Exception) {}
+
+            if (vozLista && motorVozCajero != null) {
+                motorVozCajero?.speak("Prueba de audio correcta. YAPENEGOCIOSVOZ lista para cobrar.", TextToSpeech.QUEUE_FLUSH, null, "TEST_TTS")
+            }
+        }
+    }
+
+    private fun enviarCuadrePorWhatsApp() {
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        val nom = prefs.getString("nombre_tienda", "Mi Tienda")
+        val caj = prefs.getString("cajero_activo", "Cajero")
+        val fechaHoy = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
+        val horaActual = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+
+        val mensaje = "📊 *CIERRE DE CAJA - YAPENEGOCIOSVOZ*\n\n" +
+                "🏪 *Negocio:* $nom\n" +
+                "📅 *Fecha:* $fechaHoy ($horaActual)\n" +
+                "👤 *Responsable:* $caj\n" +
+                "💰 *Total Recaudado:* S/ ${String.format(Locale.US, "%.2f", totalVentasHoyNumero)}\n" +
+                "📋 *Total Operaciones:* $cantidadVentasHoy cobros confirmados\n\n" +
+                "✅ _Reporte generado automáticamente._"
+
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com/send?text=" + Uri.encode(mensaje)))
+        startActivity(intent)
     }
 
     private fun verificarSemaforoLector() {
@@ -1310,43 +1427,66 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         jobSincronizador = CoroutineScope(Dispatchers.IO).launch {
             while (isActive) {
-                try {
-                    val url = "$SERVIDOR_URL?accion=consultar_cobros&codigoTienda=$cod"
-                    val req = Request.Builder().url(url).get().build()
-                    val res = client.newCall(req).execute()
-                    val jsonStr = res.body?.string() ?: "[]"
-                    res.close()
-                    val array = JSONArray(jsonStr)
+                val hayNet = verificarConexionInternet()
+                withContext(Dispatchers.Main) {
+                    bannerSinInternet.visibility = if (hayNet) View.GONE else View.VISIBLE
+                }
 
-                    if (array.length() > 0) {
-                        val ultimoCobro = array.getJSONObject(0)
-                        val idCobro = ultimoCobro.optInt("id", -1)
-                        val monto = ultimoCobro.optString("monto", "0.00")
-                        val nombre = ultimoCobro.optString("nombre", "Cliente")
+                if (hayNet) {
+                    try {
+                        val url = "$SERVIDOR_URL?accion=consultar_cobros&codigoTienda=$cod"
+                        val req = Request.Builder().url(url).get().build()
+                        val res = client.newCall(req).execute()
+                        val jsonStr = res.body?.string() ?: "[]"
+                        res.close()
+                        val array = JSONArray(jsonStr)
 
-                        if (ultimoIdCobroConocido == -1) {
-                            ultimoIdCobroConocido = idCobro
-                        } else if (idCobro > ultimoIdCobroConocido) {
-                            ultimoIdCobroConocido = idCobro
+                        if (array.length() > 0) {
+                            val ultimoCobro = array.getJSONObject(0)
+                            val idCobro = ultimoCobro.optInt("id", -1)
+                            val monto = ultimoCobro.optString("monto", "0.00")
+                            val nombre = ultimoCobro.optString("nombre", "Cliente")
+
+                            if (ultimoIdCobroConocido == -1) {
+                                ultimoIdCobroConocido = idCobro
+                            } else if (idCobro > ultimoIdCobroConocido) {
+                                ultimoIdCobroConocido = idCobro
+
+                                withContext(Dispatchers.Main) {
+                                    if (prefs.getBoolean("voz_activa", true) && vozLista) {
+                                        reproducirTimbreYVozLocal("Yape", monto)
+                                    }
+                                    imgQrPOS.visibility = View.GONE
+                                    txtMontoQrPOS.visibility = View.GONE
+                                    Toast.makeText(this@MainActivity, "✅ ¡Cobro confirmado! S/ $monto de $nombre", Toast.LENGTH_LONG).show()
+                                }
+                            }
 
                             withContext(Dispatchers.Main) {
-                                if (prefs.getBoolean("voz_activa", true) && vozLista) {
-                                    val frase = if (monto == "1" || monto == "1.00") "un sol" else "$monto soles"
-                                    motorVozCajero?.speak("¡Te llegó un cobro de $frase! ¡A seguir sumando!", TextToSpeech.QUEUE_FLUSH, null, "TTS_CAJA")
-                                }
-                                imgQrPOS.visibility = View.GONE
-                                txtMontoQrPOS.visibility = View.GONE
-                                Toast.makeText(this@MainActivity, "✅ ¡Cobro confirmado! S/ $monto de $nombre", Toast.LENGTH_LONG).show()
+                                actualizarListaCaja(array)
                             }
                         }
-
-                        withContext(Dispatchers.Main) {
-                            actualizarListaCaja(array)
-                        }
-                    }
-                } catch (e: Exception) {}
+                    } catch (e: Exception) {}
+                }
                 delay(2500)
             }
+        }
+    }
+
+    private fun reproducirTimbreYVozLocal(metodo: String, monto: String) {
+        CoroutineScope(Dispatchers.Default).launch {
+            try {
+                val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
+                val toneG = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
+                toneG.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
+                delay(220)
+                toneG.release()
+            } catch (e: Exception) {}
+
+            val frase = if (monto == "1" || monto == "1.00") "un sol" else "$monto soles"
+            motorVozCajero?.speak("¡Te llegó un cobro de $frase! ¡A seguir sumando!", TextToSpeech.QUEUE_FLUSH, null, "TTS_CAJA")
         }
     }
 
@@ -1373,7 +1513,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun actualizarListaCaja(array: JSONArray) {
         layoutListaCobrosCaja.removeAllViews()
-        var sumaTotal = 0.0
+        var suma = 0.0
+        var conteo = 0
         val fechaHoy = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
 
         for (i in 0 until minOf(array.length(), 15)) {
@@ -1382,7 +1523,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val fStr = item.optString("fecha", "")
 
             if (fStr == fechaHoy) {
-                sumaTotal += mStr.toDoubleOrNull() ?: 0.0
+                suma += mStr.toDoubleOrNull() ?: 0.0
+                conteo++
             }
 
             val row = LinearLayout(this).apply {
@@ -1410,7 +1552,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             row.addView(txtM)
             layoutListaCobrosCaja.addView(row)
         }
-        txtTotalHoyCaja.text = String.format(Locale.US, "S/ %.2f", sumaTotal)
+
+        totalVentasHoyNumero = suma
+        cantidadVentasHoy = conteo
+        actualizarVistaSaldo()
     }
 
     private fun pedirPinDueño(prefs: android.content.SharedPreferences, onOk: () -> Unit) {
@@ -1545,7 +1690,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onDestroy()
     }
 
-    // FACTORÍA VISUAL FINTECH
     private fun crearTarjetaFintech(context: Context): LinearLayout {
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -1557,7 +1701,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 setStroke(2, Color.parseColor("#F1E4F5"))
             }
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 0, 0, 22)
+                setMargins(0, 0, 0, 20)
             }
         }
     }
