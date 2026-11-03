@@ -87,7 +87,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var ultimoIdCobroConocido = -1
     private var jobSincronizador: Job? = null
 
-    // ELEMENTOS DE FORMULARIOS Y PESTAÑAS
+    // ELEMENTOS CONFIGURACIÓN Y CAJEROS
     private lateinit var inCorreoRegistro: EditText
     private lateinit var inCorreoLoginDueño: EditText
     private lateinit var txtCodigoTiendaCajerosTab: TextView
@@ -121,30 +121,27 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val scrollOnboarding = ScrollView(this)
         val containerOnboarding = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(35, 45, 35, 45)
+            setPadding(35, 40, 35, 40)
         }
         scrollOnboarding.addView(containerOnboarding)
 
         // =========================================================================
-        // PANTALLA 1: PORTADA FINTECH (YAPENEGOCIOSVOZ)
+        // PANTALLA 1: PORTADA OFICIAL (CON EL LOGO HORIZONTAL EN ALTA RESOLUCIÓN)
         // =========================================================================
         layoutPortada = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val cardPortada = crearTarjetaFintech(this)
 
-        val titApp = TextView(this).apply {
-            text = "YAPENEGOCIOSVOZ 🇵🇪"
-            textSize = 26f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
-            setPadding(0, 0, 0, 8)
-        }
-
-        val eslogan = TextView(this).apply {
-            text = "“La app gratuita de notificaciones por audio, caja registradora y cuentas al día.”"
-            textSize = 14f
-            setTypeface(null, Typeface.ITALIC)
-            setTextColor(Color.parseColor("#475569"))
-            setPadding(0, 0, 0, 28)
+        // BANNER CON EL LOGO CORPORATIVO
+        val imgBannerPortada = ImageView(this).apply {
+            setImageResource(R.drawable.logo_horizontal)
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 10, 0, 25)
+            }
         }
 
         val btnDueño = crearBotonFintech(this, "👑 SOY EL DUEÑO\n(Administrador de Negocio)", COLOR_YAPE_PURPLE) {
@@ -165,8 +162,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setTextColor(Color.parseColor("#0F172A"))
         }
 
-        cardPortada.addView(titApp)
-        cardPortada.addView(eslogan)
+        cardPortada.addView(imgBannerPortada)
         cardPortada.addView(btnDueño)
         cardPortada.addView(btnCajeroPequeno)
         layoutPortada.addView(cardPortada)
@@ -516,10 +512,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layoutLoginCajero.addView(cardLogin)
 
         // =========================================================================
-        // PANTALLA 3: BIENVENIDA
+        // PANTALLA 3: BIENVENIDA (CON EL BANNER HORIZONTAL)
         // =========================================================================
         layoutBienvenida = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardBienvenida = crearTarjetaFintech(this)
+
+        val imgBannerBienvenida = ImageView(this).apply {
+            setImageResource(R.drawable.logo_horizontal)
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 0, 0, 20)
+            }
+        }
 
         val titBv = TextView(this).apply {
             text = "🎉 ¡Bienvenido a YAPENEGOCIOSVOZ!"
@@ -546,6 +554,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             mostrarSeccion(layoutPermiso1Lector)
         }
 
+        cardBienvenida.addView(imgBannerBienvenida)
         cardBienvenida.addView(titBv)
         cardBienvenida.addView(fraseBv)
         cardBienvenida.addView(descBv)
@@ -660,7 +669,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layoutAppPrincipal = RelativeLayout(this).apply { visibility = View.GONE }
 
         scrollPrincipal = ScrollView(this).apply {
-            setPadding(30, 20, 30, 170) // Espacio para que la barra inferior no tape el contenido
+            setPadding(30, 20, 30, 170)
             clipToPadding = false
         }
         val containerTabs = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -1052,7 +1061,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         containerTabs.addView(tabCajeros)
         containerTabs.addView(tabConfiguracion)
 
-        // BARRA INFERIOR FLOTANTE (DOCK)
         barraNavegacionInferior = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             background = crearBordeRedondo("#FFFFFF", "#E2E8F0", 30f)
@@ -1537,9 +1545,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onDestroy()
     }
 
-    // =========================================================================
-    // FACTORÍA VISUAL FINTECH (RELIEVE, SOMBRAS Y RIPPLE EFFECT)
-    // =========================================================================
+    // FACTORÍA VISUAL FINTECH
     private fun crearTarjetaFintech(context: Context): LinearLayout {
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -1578,7 +1584,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 cornerRadius = 20f
             }
 
-            // Efecto Ripple nativo
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 background = RippleDrawable(ColorStateList.valueOf(Color.parseColor("#33FFFFFF")), baseShape, null)
             } else {
