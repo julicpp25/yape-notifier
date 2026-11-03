@@ -3,12 +3,14 @@ package com.notiyape.app
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.speech.tts.TextToSpeech
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -22,112 +24,20 @@ import java.util.*
 class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitListener {
 
     private val client = OkHttpClient()
-   
     private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbw0_0UBYuP2yVjPHOmMDyLlehzvT41nuJPPCOnRw2Zd1V1Y57xI2nHUyVI1nSBhR7F_3w/exec"
+
     private var motorVoz: TextToSpeech? = null
     private var vozLista = false
 
     private val frasesMotivadoras = listOf(
-       "¡El éxito no se detiene!",
-        "¡Suma y sigue!",
-        "¡Negocio en marcha!",
-        "¡Cada yapeo cuenta!",
-        "¡A toda máquina!",
-        "¡Un paso más cerca de la meta!",
-        "¡El esfuerzo rinde frutos!",
-        "¡Rumbo a la cima!",
-        "¡Fuerza y constante crecimiento!",
-        "¡Imparables hoy!",
-        "¡Dale que se puede!",
-        "¡Hoy se rompen récords!",
-        "¡Constancia y éxito!",
-        "¡Seguimos avanzando!",
-        "¡La meta está más cerca!",
-        "¡A paso firme!",
-        "¡El trabajo duro se nota!",
-        "¡El negocio no descansa!",
-        "¡Camino a un día increíble!",
-        "¡Paso a paso, llegando lejos!",
-        "¡Caja llena, corazón contento!",
-        "¡Sonando la caja!",
-        "¡Más saldo a favor!",
-        "¡La caja registradora no para!",
-        "¡Suma que suma!",
-        "¡Ingreso confirmado!",
-        "¡Dinero al bolsillo!",
-        "¡Cuenta recargada!",
-        "¡Facturando a lo grande!",
-        "¡Yape directo al éxito!",
-        "¡Multiplicando ingresos!",
-        "¡Caja verde!",
-        "¡Sumando números verdes!",
-        "¡La cuenta sigue creciendo!",
-        "¡Otro yape para la lista!",
-        "¡Balance positivo!",
-        "¡Entrada confirmada!",
-        "¡Sumando con fuerza!",
-        "¡Un yape más a la cuenta!",
-        "¡Caja en movimiento constante!",
-        "¡No paramos de vender!",
-        "¡Racha ganadora!",
-        "¡Ritmo imbatible!",
-        "¡Cliente satisfecho, negocio contento!",
-        "¡A toda velocidad!",
-        "¡Con la bendición del día!",
-        "¡El día está encendido!",
-        "¡Fluidez total en caja!",
-        "¡Moviendo la mercadería!",
-        "¡El día promete bastante!",
-        "¡Sigue la buena racha!",
-        "¡Nada nos detiene!",
-        "¡Negocio activo al 100%!",
-        "¡Qué gran jornada!",
-        "¡Con todo el entusiasmo!",
-        "¡Ventana de oportunidades abierta!",
-        "¡Energía positiva en cada venta!",
-        "¡Esto recién empieza!",
-        "¡Modo imparable activado!",
-        "¡Ventas en serie!",
-        "¡Orgullo emprendedor!",
-        "¡Fruto de tu dedicación!",
-        "¡Premio al trabajo bien hecho!",
-        "¡Haciendo historia hoy!",
-        "¡Excelencia en cada atención!",
-        "¡Tu esfuerzo vale oro!",
-        "¡Creciendo como los grandes!",
-        "¡Construyendo el futuro!",
-        "¡Especialistas en vender!",
-        "¡Bien jugado!",
-        "¡Un triunfo más!",
-        "¡Premio a la constancia!",
-        "¡Visión de éxito!",
-        "¡Avanzando a pasos gigantes!",
-        "¡Cosechando resultados!",
-        "¡Determinación total!",
-        "¡Marca registrada de éxito!",
-        "¡Superando expectativas!",
-        "¡Imposible frenar este crecimiento!",
-        "¡Triunfo asegurado!",
-        "¡Otro más!",
-        "¡Yape recibido!",
-        "¡Venta lograda!",
-        "¡Aprobado!",
-        "¡Confirmado!",
-        "¡Suma exitosa!",
-        "¡Directo a la caja!",
-        "¡Punto para el negocio!",
-        "¡Suma registrada!",
-        "¡Pago al instante!",
-        "¡Venta al hilo!",
-        "¡Check en la lista!",
-        "¡Concretado!",
-        "¡Cobro exitoso!",
-        "¡Yapeo en línea!",
-        "¡Otro cliente feliz!",
-        "¡Suma instantánea!",
-        "¡Operación lista!",
-        "¡Enviado y recibido!",
-        "¡Caja actualizada!",
+        "¡A seguir sumando!",
+        "¡Excelente venta!",
+        "¡Vamos por más!",
+        "¡El negocio está imparable!",
+        "¡Buen trabajo!",
+        "¡Caja sumando!",
+        "¡A seguir facturando!",
+        "¡Qué buena racha!"
     )
 
     override fun onCreate() {
@@ -168,7 +78,7 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
 
         val pkg = sbn.packageName
 
-        // DETECCIÓN MULTIBANCO (YAPE + TODOS LOS PLIN DE PERÚ)
+        // DETECCIÓN MULTIBANCO EN PERÚ
         val esYape = (pkg == "com.bcp.innovacxion.yapeapp")
         val esInterbank = (pkg == "pe.com.interbank.mobilebanking")
         val esBBVA = (pkg == "com.bbva.bbvacontigo")
@@ -203,7 +113,7 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         val matchMonto = regexMonto.find(texto)
         val monto = matchMonto?.groups?.get(1)?.value?.replace(",", ".") ?: "0.00"
 
-        // Extraer Remitente (Corregido con comillas vacías)
+        // Extraer Remitente
         var remitente = "Cliente"
         if (texto.contains("te envi", ignoreCase = true) || texto.contains("transfirió", ignoreCase = true) || texto.contains("pago de", ignoreCase = true)) {
             val antes = texto.split(Regex("(te envi[oó]|transfiri[oó]|pago de)", RegexOption.IGNORE_CASE))[0]
@@ -213,8 +123,9 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         }
         if (remitente.isEmpty()) remitente = "Cliente"
 
+        // ANUNCIO POR VOZ CON TIMBRE PREVIO
         if (prefs.getBoolean("voz_activa", true)) {
-            hablarEnVozAlta(metodo, monto)
+            reproducirTimbreYVoz(metodo, monto)
         }
 
         guardarCobroLocal(remitente, monto, metodo)
@@ -231,22 +142,31 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         }
     }
 
-    private fun hablarEnVozAlta(metodo: String, monto: String) {
-        if (vozLista && motorVoz != null) {
+    private fun reproducirTimbreYVoz(metodo: String, monto: String) {
+        CoroutineScope(Dispatchers.Default).launch {
             try {
+                // 1. TIMBRE AGUDO DE CAJA REGISTRADORA (DING-DING)
                 val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
+
+                val toneG = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
+                toneG.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
+                delay(220)
+                toneG.release()
             } catch (e: Exception) {}
 
-            val fraseMonto = if (monto == "1" || monto == "1.00") "un sol" else "$monto soles"
-            val animo = frasesMotivadoras.random()
-            val discurso = "¡Te llegó un $metodo de $fraseMonto! $animo"
+            // 2. VOZ HUMANA
+            if (vozLista && motorVoz != null) {
+                val fraseMonto = if (monto == "1" || monto == "1.00") "un sol" else "$monto soles"
+                val animo = frasesMotivadoras.random()
+                val discurso = "¡Te llegó un $metodo de $fraseMonto! $animo"
 
-            val params = Bundle().apply {
-                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+                val params = Bundle().apply {
+                    putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+                }
+                motorVoz?.speak(discurso, TextToSpeech.QUEUE_FLUSH, params, "ID_TTS")
             }
-            motorVoz?.speak(discurso, TextToSpeech.QUEUE_FLUSH, params, "ID_TTS")
         }
     }
 
