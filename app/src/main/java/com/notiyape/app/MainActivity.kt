@@ -45,8 +45,10 @@ import java.util.*
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbw0_0UBYuP2yVjPHOmMDyLlehzvT41nuJPPCOnRw2Zd1V1Y57xI2nHUyVI1nSBhR7F_3w/exec"
-    private val NUMERO_SOPORTE_WSP = "51999999999"
-    private val URL_POLITICA_PRIVACIDAD = "https://noticobros.peru@gmail.com"
+    private val NUMERO_SOPORTE_WSP = "51916224843"
+    private val URL_POLITICA_PRIVACIDAD = "https://sites.google.com/view/yapealdia/documentaci%C3%B3n"
+    private val URL_TUTORIAL_QR = "https://sites.google.com/view/yapealdia/inicio"
+
     private val REQ_GOOGLE_PICKER_REGISTRO = 1001
     private val REQ_GOOGLE_PICKER_LOGIN = 1002
 
@@ -139,7 +141,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         rootLayout = FrameLayout(this).apply {
-            setBackgroundColor(Color.parseColor(if (esModoOscuro) "#0B0F19" else "#F8FAFC"))
+            setBackgroundColor(Color.parseColor(if (esModoOscuro) "#0F172A" else "#F8FAFC"))
         }
 
         bannerSinInternet = TextView(this).apply {
@@ -171,7 +173,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 setMargins(0, 10, 0, 24)
             }
         }
-        val btnDueño = crearBotonPrimario(this, "👑 SOY EL DUEÑO\n(Administrador de Negocio)") {
+        val btnDueño = crearBotonPrimario(this, "👑 SOY EL DUEÑO\n(Administrar Negocio)") {
             if (prefs.getBoolean("tienda_registrada", false)) {
                 pedirPinDueño(prefs) {
                     esSesionDueño = true
@@ -436,7 +438,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         barraSubCaja.addView(txtInfoCajero); barraSubCaja.addView(switchVozCaja); barraSubCaja.addView(btnSalirCaj)
 
-        // Filtro Fechas Admin (CON VARIABLE DE CLASE CORRECTA)
+        // Filtro Fechas Admin
         cardFiltroFechas = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", "#E2E8F0", 16f)
@@ -446,15 +448,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         txtTituloPeriodo = TextView(this).apply { text = "📅 Período: Ventas de Hoy"; textSize = 13f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) }
         val rowF = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         
-        val btnFiltroHoy = Button(this).apply { 
+        btnFiltroHoy = Button(this).apply { 
             text = "Hoy"; textSize = 11f; background = crearBordeRedondo(COLOR_PRIMARY, COLOR_PRIMARY, 10f); setTextColor(Color.WHITE); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { fechaSeleccionadaFiltro = ""; txtTituloPeriodo.text = "📅 Período: Ventas de Hoy"; consultarCobrosServidorUnaVez() } 
         }
-        val btnFiltroAyer = Button(this).apply { 
+        btnFiltroAyer = Button(this).apply { 
             text = "Ayer"; textSize = 11f; background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 10f); setTextColor(Color.parseColor("#475569")); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { val c = Calendar.getInstance().apply { add(Calendar.DATE, -1) }; fechaSeleccionadaFiltro = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(c.time); txtTituloPeriodo.text = "📅 Período: Ayer ($fechaSeleccionadaFiltro)"; consultarCobrosServidorUnaVez() } 
         }
-        val btnFiltroCalendario = Button(this).apply { 
+        btnFiltroCalendario = Button(this).apply { 
             text = "📆 Calendario"; textSize = 11f; background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 10f); setTextColor(Color.parseColor("#475569")); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f)
             setOnClickListener { abrirSelectorCalendario() } 
         }
@@ -548,6 +550,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardNewCaj.addView(inNCaj); cardNewCaj.addView(inPCaj); cardNewCaj.addView(btnSaveCaj); cardNewCaj.addView(layoutListaCajerosAdmin)
         tabCajeros.addView(cardNewCaj)
 
+        // CONFIGURACIÓN DE QR CON ENLACE DIRECTO AL TUTORIAL DE TU WEB
         val cardQRTab = crearTarjetaFintech(this)
         inQrConfigTabCajeros = crearInputFintech(this, "Pega el texto de tu QR de Yape (000201...)").apply { setText(prefs.getString("qr_base_yape", "")) }
         val btnSaveQR = crearBotonPrimario(this, "Guardar mi QR de Yape 💾") {
@@ -566,7 +569,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
         }
         cardQRTab.addView(TextView(this).apply { text = "📸 Configurar mi Código QR de Yape"; textSize = 16f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
-        cardQRTab.addView(Button(this).apply { text = "▶️ Ver Video Tutorial de cómo obtener el QR"; setTextColor(Color.parseColor("#2563EB")); setBackgroundColor(Color.TRANSPARENT); setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=como+obtener+texto+codigo+qr+yape"))) } })
+        cardQRTab.addView(Button(this).apply { 
+            text = "▶️ Ver Tutorial: Cómo obtener mi código QR de Yape"
+            setTextColor(Color.parseColor("#2563EB"))
+            setBackgroundColor(Color.TRANSPARENT)
+            textSize = 13f
+            setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(URL_TUTORIAL_QR))) } 
+        })
         cardQRTab.addView(inQrConfigTabCajeros); cardQRTab.addView(btnSaveQR)
         tabCajeros.addView(cardQRTab)
 
@@ -593,12 +602,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val cod = prefs.getString("codigo_tienda", ""); val nom = prefs.getString("nombre_tienda", "")
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com/send?phone=$NUMERO_SOPORTE_WSP&text=" + Uri.encode("Hola Soporte YapeAlDía, negocio $nom ($cod)"))))
         }
+        val btnPolitica = Button(this).apply {
+            text = "📄 Política de Privacidad y Seguridad"
+            setTextColor(Color.parseColor("#2563EB"))
+            setBackgroundColor(Color.TRANSPARENT)
+            textSize = 13f
+            setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(URL_POLITICA_PRIVACIDAD))) }
+        }
         val btnLogout = Button(this).apply {
             text = "CERRAR SESIÓN"; setTextColor(Color.parseColor("#DC2626")); setBackgroundColor(Color.TRANSPARENT); textSize = 14f; setTypeface(null, Typeface.BOLD)
             setOnClickListener { jobSincronizador?.cancel(); prefs.edit().putBoolean("cajero_logueado", false).apply(); mostrarSeccion(layoutPortada) }
         }
         cardCfg.addView(TextView(this).apply { text = "ESTADO DEL SISTEMA"; textSize = 15f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
-        cardCfg.addView(rowBdg); cardCfg.addView(btnModoOscuroAjustes); cardCfg.addView(btnPinD); cardCfg.addView(btnSheet); cardCfg.addView(btnTestSound); cardCfg.addView(btnWspHelp); cardCfg.addView(btnLogout)
+        cardCfg.addView(rowBdg); cardCfg.addView(btnModoOscuroAjustes); cardCfg.addView(btnPinD); cardCfg.addView(btnSheet); cardCfg.addView(btnTestSound); cardCfg.addView(btnWspHelp); cardCfg.addView(btnPolitica); cardCfg.addView(btnLogout)
         tabConfiguracion.addView(cardCfg)
 
         containerTabs.addView(tabCajaPOS); containerTabs.addView(tabCajeros); containerTabs.addView(tabConfiguracion)
