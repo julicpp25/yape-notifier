@@ -52,7 +52,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private val COLOR_PRIMARY = "#6B1D7B"
     private val COLOR_ACCENT = "#00D2B4"
-    private val COLOR_TEXT_MUTED = "#64748B"
 
     private val client = OkHttpClient()
     private var motorVozCajero: TextToSpeech? = null
@@ -77,6 +76,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var tabCajaPOS: LinearLayout
     private lateinit var tabCajeros: LinearLayout
     private lateinit var tabConfiguracion: LinearLayout
+    private lateinit var barraNavegacionInferior: LinearLayout
     private lateinit var btnNavCaja: Button
     private lateinit var btnNavCajeros: Button
     private lateinit var btnNavConfig: Button
@@ -115,6 +115,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var layoutListaCajerosAdmin: LinearLayout
     private lateinit var btnModoOscuroAjustes: Button
 
+    // FILTRO CALENDARIO
     private lateinit var cardFiltroFechas: LinearLayout
     private lateinit var txtTituloPeriodo: TextView
     private var esSesionDueño = false
@@ -170,7 +171,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 setMargins(0, 10, 0, 24)
             }
         }
-        val btnDueño = crearBotonPrimario(this, "👑 SOY EL DUEÑO\n(Administrar Negocio)") {
+        val btnDueño = crearBotonPrimario(this, "👑 SOY EL DUEÑO\n(Administrador de Negocio)") {
             if (prefs.getBoolean("tienda_registrada", false)) {
                 pedirPinDueño(prefs) {
                     esSesionDueño = true
@@ -435,7 +436,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         barraSubCaja.addView(txtInfoCajero); barraSubCaja.addView(switchVozCaja); barraSubCaja.addView(btnSalirCaj)
 
-        // Filtro Fechas Admin
+        // Filtro Fechas Admin (CON VARIABLE DE CLASE CORRECTA)
         cardFiltroFechas = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", "#E2E8F0", 16f)
@@ -444,9 +445,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         txtTituloPeriodo = TextView(this).apply { text = "📅 Período: Ventas de Hoy"; textSize = 13f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) }
         val rowF = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        btnFiltroHoy = Button(this).apply { text = "Hoy"; textSize = 11f; background = crearBordeRedondo(COLOR_PRIMARY, COLOR_PRIMARY, 10f); setTextColor(Color.WHITE); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f); setOnClickListener { fechaSeleccionadaFiltro = ""; txtTituloPeriodo.text = "📅 Período: Ventas de Hoy"; consultarCobrosServidorUnaVez() } }
-        btnFiltroAyer = Button(this).apply { text = "Ayer"; textSize = 11f; background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 10f); setTextColor(Color.parseColor("#475569")); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f); setOnClickListener { val c = Calendar.getInstance().apply { add(Calendar.DATE, -1) }; fechaSeleccionadaFiltro = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(c.time); txtTituloPeriodo.text = "📅 Período: Ayer ($fechaSeleccionadaFiltro)"; consultarCobrosServidorUnaVez() } }
-        btnFiltroCalendario = Button(this).apply { text = "📆 Calendario"; textSize = 11f; background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 10f); setTextColor(Color.parseColor("#475569")); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f); setOnClickListener { abrirSelectorCalendario() } }
+        
+        val btnFiltroHoy = Button(this).apply { 
+            text = "Hoy"; textSize = 11f; background = crearBordeRedondo(COLOR_PRIMARY, COLOR_PRIMARY, 10f); setTextColor(Color.WHITE); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener { fechaSeleccionadaFiltro = ""; txtTituloPeriodo.text = "📅 Período: Ventas de Hoy"; consultarCobrosServidorUnaVez() } 
+        }
+        val btnFiltroAyer = Button(this).apply { 
+            text = "Ayer"; textSize = 11f; background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 10f); setTextColor(Color.parseColor("#475569")); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener { val c = Calendar.getInstance().apply { add(Calendar.DATE, -1) }; fechaSeleccionadaFiltro = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(c.time); txtTituloPeriodo.text = "📅 Período: Ayer ($fechaSeleccionadaFiltro)"; consultarCobrosServidorUnaVez() } 
+        }
+        val btnFiltroCalendario = Button(this).apply { 
+            text = "📆 Calendario"; textSize = 11f; background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 10f); setTextColor(Color.parseColor("#475569")); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f)
+            setOnClickListener { abrirSelectorCalendario() } 
+        }
+        
         rowF.addView(btnFiltroHoy); rowF.addView(btnFiltroAyer); rowF.addView(btnFiltroCalendario)
         cardFiltroFechas.addView(txtTituloPeriodo); cardFiltroFechas.addView(rowF)
 
