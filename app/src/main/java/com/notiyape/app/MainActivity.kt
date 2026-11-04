@@ -45,7 +45,7 @@ import java.util.*
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbw0_0UBYuP2yVjPHOmMDyLlehzvT41nuJPPCOnRw2Zd1V1Y57xI2nHUyVI1nSBhR7F_3w/exec"
-    private val NUMERO_SOPORTE_WSP = "51999999999"
+    private val NUMERO_SOPORTE_WSP = "51999999999" // Pon tu número de WhatsApp
     private val URL_POLITICA_PRIVACIDAD = "https://noticobros.peru@gmail.com"
     private val REQ_GOOGLE_PICKER_REGISTRO = 1001
     private val REQ_GOOGLE_PICKER_LOGIN = 1002
@@ -91,12 +91,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var ultimoIdCobroConocido = -1
     private var jobSincronizador: Job? = null
 
-    // GESTIÓN DE TURNOS AISLADOS (CAJERO)
     private var timestampInicioTurnoCajero: Long = 0L
     private var fechaInicioTurnoStr = ""
     private var horaInicioTurnoStr = ""
 
-    // ESTADO DE PRIVACIDAD Y FILTROS POR FECHA
     private var saldoOculto = false
     private var totalVentasFiltradas = 0.0
     private var cantidadVentasFiltradas = 0
@@ -113,7 +111,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var layoutListaCajerosAdmin: LinearLayout
     private lateinit var btnModoOscuroAjustes: Button
 
-    // FILTROS CALENDARIO
     private lateinit var cardFiltroFechas: LinearLayout
     private lateinit var btnFiltroHoy: Button
     private lateinit var btnFiltroAyer: Button
@@ -162,9 +159,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         scrollOnboarding.addView(containerOnboarding)
 
-        // =========================================================================
-        // PANTALLA 1: PORTADA OFICIAL (YapeAlDía)
-        // =========================================================================
+        // PANTALLA 1: PORTADA OFICIAL
         layoutPortada = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val cardPortada = crearTarjetaFintech(this)
 
@@ -200,9 +195,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardPortada.addView(btnCajeroPequeno)
         layoutPortada.addView(cardPortada)
 
-        // =========================================================================
         // PANTALLA 2: REGISTRO DE DUEÑO
-        // =========================================================================
         layoutRegistroDueño = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardReg = crearTarjetaFintech(this)
 
@@ -332,9 +325,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardReg.addView(btnVolverReg)
         layoutRegistroDueño.addView(cardReg)
 
-        // =========================================================================
         // PANTALLA: LOGIN DE DUEÑO
-        // =========================================================================
         layoutLoginDueño = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardLoginDueño = crearTarjetaFintech(this)
 
@@ -450,9 +441,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardLoginDueño.addView(btnVolverLoginDueño)
         layoutLoginDueño.addView(cardLoginDueño)
 
-        // =========================================================================
         // PANTALLA: LOGIN DE CAJERO
-        // =========================================================================
         layoutLoginCajero = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardLogin = crearTarjetaFintech(this)
 
@@ -554,9 +543,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardLogin.addView(btnVolverLogin)
         layoutLoginCajero.addView(cardLogin)
 
-        // =========================================================================
         // PANTALLA 3: BIENVENIDA
-        // =========================================================================
         layoutBienvenida = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardBienvenida = crearTarjetaFintech(this)
 
@@ -601,9 +588,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardBienvenida.addView(btnIniciarAsistente)
         layoutBienvenida.addView(cardBienvenida)
 
-        // =========================================================================
         // ASISTENTE DE PERMISOS
-        // =========================================================================
         layoutPermiso1Lector = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardP1 = crearTarjetaFintech(this)
         val titP1 = TextView(this).apply {
@@ -763,9 +748,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardP3.addView(txtAdvertencia3)
         layoutPermiso3Bateria.addView(cardP3)
 
-        // =========================================================================
-        // PANTALLA PRINCIPAL: 3 PESTAÑAS CON DOCK INFERIOR
-        // =========================================================================
+        // PANTALLA PRINCIPAL
         layoutAppPrincipal = RelativeLayout(this).apply { visibility = View.GONE }
 
         scrollPrincipal = ScrollView(this).apply {
@@ -775,7 +758,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val containerTabs = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scrollPrincipal.addView(containerTabs)
 
-        // --- PESTAÑA 1: CAJA / POS ---
+        // PESTAÑA 1: CAJA / POS
         tabCajaPOS = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val barraSubCaja = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -804,9 +787,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setTextColor(Color.WHITE)
             background = crearBordeRedondo("#DC2626", "#DC2626", 14f)
             setPadding(18, 10, 18, 10)
-            setOnClickListener {
-                confirmarCierreDeTurno()
-            }
+            setOnClickListener { confirmarCierreDeTurno() }
         }
         barraSubCaja.addView(txtInfoCajero)
         barraSubCaja.addView(switchVozCaja)
@@ -1000,7 +981,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         tabCajaPOS.addView(cardCobroPOS)
         tabCajaPOS.addView(cardHistorialCaja)
 
-        // --- PESTAÑA 2: CAJEROS ---
+        // PESTAÑA 2: CAJEROS
         tabCajeros = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardCodCaja = crearTarjetaFintech(this)
         val titCodCaja = TextView(this).apply {
@@ -1158,9 +1139,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         val btnGuardarQr = crearBotonFintech(this, "Guardar mi QR de Yape 💾", COLOR_YAPE_PURPLE) {
             val qrRaw = inQrConfigTabCajeros.text.toString().trim()
+            val cod = prefs.getString("codigo_tienda", "") ?: ""
             if (qrRaw.isNotEmpty()) {
                 prefs.edit().putString("qr_base_yape", qrRaw).apply()
-                Toast.makeText(this, "✅ QR de Yape guardado exitosamente", Toast.LENGTH_SHORT).show()
+
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val json = JSONObject().apply {
+                            put("accion", "guardar_qr")
+                            put("codigoTienda", cod)
+                            put("qrBase", qrRaw)
+                        }
+                        val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                        val req = Request.Builder().url(SERVIDOR_URL).post(body).build()
+                        client.newCall(req).execute().close()
+                    } catch (e: Exception) {}
+                }
+
+                Toast.makeText(this, "✅ QR de Yape guardado permanentemente en la nube", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(this, "Pega un código de QR válido", Toast.LENGTH_SHORT).show()
             }
@@ -1172,7 +1168,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardConfigQr.addView(btnGuardarQr)
         tabCajeros.addView(cardConfigQr)
 
-        // --- PESTAÑA 3: AJUSTES ---
+        // PESTAÑA 3: AJUSTES
         tabConfiguracion = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardConfig = crearTarjetaFintech(this)
 
@@ -1300,7 +1296,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         containerTabs.addView(tabCajeros)
         containerTabs.addView(tabConfiguracion)
 
-        // BARRA INFERIOR FLOTANTE
         barraNavegacionInferior = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", if (esModoOscuro) "#334155" else "#E2E8F0", 30f)
@@ -1796,13 +1791,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             }
 
-            suma += mStr.toDoubleOrNull() ?: 0.0
+            val montoLimpio = mStr.replace(",", ".").toDoubleOrNull() ?: 0.0
+            suma += montoLimpio
             conteo++
 
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(18, 14, 18, 14)
-                background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", if (esModoOscuro) "#334155" else "#E2E8F0", 14f)
+                background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", "#E2E8F0", 14f)
                 elevation = 4f
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                     setMargins(0, 0, 0, 8)
@@ -1816,7 +1812,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
             val txtM = TextView(this).apply {
-                text = "+ S/ $mStr"
+                text = String.format(Locale.US, "+ S/ %.2f", montoLimpio)
                 textSize = 16f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
