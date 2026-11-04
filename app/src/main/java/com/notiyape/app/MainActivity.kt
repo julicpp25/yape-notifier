@@ -80,7 +80,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var btnNavCajeros: Button
     private lateinit var btnNavConfig: Button
 
-    // ELEMENTOS CAJA / POS
     private lateinit var txtInfoCajero: TextView
     private lateinit var inMontoPOS: EditText
     private lateinit var imgQrPOS: ImageView
@@ -97,11 +96,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var fechaInicioTurnoStr = ""
     private var horaInicioTurnoStr = ""
 
-    // ESTADO DE PRIVACIDAD Y FILTROS POR FECHA (CALENDARIO)
+    // ESTADO DE PRIVACIDAD Y FILTROS POR FECHA
     private var saldoOculto = false
     private var totalVentasFiltradas = 0.0
     private var cantidadVentasFiltradas = 0
-    private var fechaSeleccionadaFiltro = "" // Vacio = Hoy
+    private var fechaSeleccionadaFiltro = ""
     private var esModoOscuro = false
 
     private lateinit var txtEstadoLectorDiag: TextView
@@ -114,7 +113,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var layoutListaCajerosAdmin: LinearLayout
     private lateinit var btnModoOscuroAjustes: Button
 
-    // BOTONES DE FILTRO CALENDARIO
+    // FILTROS CALENDARIO
+    private lateinit var cardFiltroFechas: LinearLayout
     private lateinit var btnFiltroHoy: Button
     private lateinit var btnFiltroAyer: Button
     private lateinit var btnFiltroCalendario: Button
@@ -451,7 +451,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layoutLoginDueño.addView(cardLoginDueño)
 
         // =========================================================================
-        // PANTALLA: LOGIN DE CAJERO (REGISTRA HORA EXACTA DE APERTURA DE TURNO)
+        // PANTALLA: LOGIN DE CAJERO
         // =========================================================================
         layoutLoginCajero = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardLogin = crearTarjetaFintech(this)
@@ -505,7 +505,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         val topicLimpio = "tienda_" + cod.replace(Regex("[^a-zA-Z0-9-_.~%]"), "_")
                         FirebaseMessaging.getInstance().subscribeToTopic(topicLimpio)
 
-                        // MARCA HORA EXACTA DE INICIO DE TURNO (AISLAMIENTO DE CAJA)
                         val nowMs = System.currentTimeMillis()
                         val horaApertura = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(nowMs))
                         val fechaApertura = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(nowMs))
@@ -765,7 +764,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layoutPermiso3Bateria.addView(cardP3)
 
         // =========================================================================
-        // PANTALLA PRINCIPAL: 3 PESTAÑAS CON BARRA FLOTANTE
+        // PANTALLA PRINCIPAL: 3 PESTAÑAS CON DOCK INFERIOR
         // =========================================================================
         layoutAppPrincipal = RelativeLayout(this).apply { visibility = View.GONE }
 
@@ -813,8 +812,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         barraSubCaja.addView(switchVozCaja)
         barraSubCaja.addView(btnCerrarSesionCajero)
 
-        // FILTRO DE FECHAS / CALENDARIO (SOLO VISIBLE PARA DUEÑO)
-        val cardFiltroFechas = LinearLayout(this).apply {
+        // FILTRO DE FECHAS (CALENDARIO)
+        cardFiltroFechas = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", "#E2E8F0", 16f)
             setPadding(16, 12, 16, 12)
@@ -865,9 +864,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 12f)
             setTextColor(Color.parseColor("#475569"))
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.3f).apply { setMargins(4, 0, 4, 0) }
-            setOnClickListener {
-                abrirSelectorCalendario()
-            }
+            setOnClickListener { abrirSelectorCalendario() }
         }
 
         rowBotonesFechas.addView(btnFiltroHoy)
@@ -1303,6 +1300,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         containerTabs.addView(tabCajeros)
         containerTabs.addView(tabConfiguracion)
 
+        // BARRA INFERIOR FLOTANTE
         barraNavegacionInferior = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", if (esModoOscuro) "#334155" else "#E2E8F0", 30f)
@@ -1431,9 +1429,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         if (esSesionDueño) {
             txtInfoCajero.text = "🏪 $nom | 👑 Dueño"
-            findViewById<View>(R.id.text)?.visibility = View.VISIBLE
+            cardFiltroFechas.visibility = View.VISIBLE
         } else {
             txtInfoCajero.text = "🏪 $nom | 👤 $caj ($horaInicioTurnoStr)"
+            cardFiltroFechas.visibility = View.GONE
         }
 
         txtBannerCodigoCajeros.text = "🔑 $cod"
@@ -1525,7 +1524,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // CIERRE Y ARQUEO DE TURNO CON AISLAMIENTO
     private fun confirmarCierreDeTurno() {
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
         val caj = prefs.getString("cajero_activo", "Cajero")
@@ -1580,7 +1578,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         startActivity(intent)
     }
 
-    // SELECTOR DE FECHAS EN CALENDARIO (DÍA, MES Y AÑO)
     private fun abrirSelectorCalendario() {
         val cal = Calendar.getInstance()
         val anio = cal.get(Calendar.YEAR)
@@ -1775,7 +1772,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // FILTRO ESTRICTO: CAJERO SOLO VE COBROS DESDE QUE INICIÓ SU TURNO
     private fun actualizarListaCaja(array: JSONArray) {
         layoutListaCobrosCaja.removeAllViews()
         var suma = 0.0
@@ -1788,13 +1784,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val fStr = item.optString("fecha", "")
             val tsItem = item.optLong("timestamp", 0L)
 
-            // Si es sesión de cajero, aislar por timestamp de apertura de turno
             if (!esSesionDueño) {
                 if (timestampInicioTurnoCajero > 0L && tsItem < timestampInicioTurnoCajero) {
-                    continue // Ignora ventas de turnos anteriores
+                    continue
                 }
             } else {
-                // Si es dueño, filtrar por la fecha seleccionada en el calendario
                 if (fechaSeleccionadaFiltro.isNotEmpty() && fStr != fechaSeleccionadaFiltro) {
                     continue
                 } else if (fechaSeleccionadaFiltro.isEmpty() && fStr != fechaHoy) {
@@ -1808,7 +1802,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(18, 14, 18, 14)
-                background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", "#E2E8F0", 14f)
+                background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", if (esModoOscuro) "#334155" else "#E2E8F0", 14f)
                 elevation = 4f
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                     setMargins(0, 0, 0, 8)
