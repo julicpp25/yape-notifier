@@ -45,11 +45,12 @@ import java.util.*
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbw0_0UBYuP2yVjPHOmMDyLlehzvT41nuJPPCOnRw2Zd1V1Y57xI2nHUyVI1nSBhR7F_3w/exec"
-    private val NUMERO_SOPORTE_WSP = "51999999999" // Pon tu número de WhatsApp
+    private val NUMERO_SOPORTE_WSP = "51999999999" // Cambia a tu número de WhatsApp
     private val URL_POLITICA_PRIVACIDAD = "https://noticobros.peru@gmail.com"
     private val REQ_GOOGLE_PICKER_REGISTRO = 1001
     private val REQ_GOOGLE_PICKER_LOGIN = 1002
 
+    // PALETA FINTECH OFICIAL YAPE
     private val COLOR_YAPE_PURPLE = "#732483"
     private val COLOR_YAPE_CYAN = "#00D2B4"
 
@@ -66,10 +67,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var layoutLoginCajero: LinearLayout
     private lateinit var layoutBienvenida: LinearLayout
 
+    // ASISTENTE DE PERMISOS
     private lateinit var layoutPermiso1Lector: LinearLayout
     private lateinit var layoutPermiso2Alertas: LinearLayout
     private lateinit var layoutPermiso3Bateria: LinearLayout
 
+    // CONTENEDOR PRINCIPAL Y PESTAÑAS
     private lateinit var layoutAppPrincipal: RelativeLayout
     private lateinit var scrollPrincipal: ScrollView
     private lateinit var tabCajaPOS: LinearLayout
@@ -80,8 +83,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var btnNavCajeros: Button
     private lateinit var btnNavConfig: Button
 
+    // ELEMENTOS CAJA / POS (TECLADO NUMÉRICO INTEGRADO)
     private lateinit var txtInfoCajero: TextView
-    private lateinit var inMontoPOS: EditText
+    private lateinit var txtMontoDisplayPOS: TextView
+    private var montoTecladoPOS: String = ""
     private lateinit var imgQrPOS: ImageView
     private lateinit var txtMontoQrPOS: TextView
     private lateinit var switchVozCaja: Switch
@@ -91,19 +96,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var ultimoIdCobroConocido = -1
     private var jobSincronizador: Job? = null
 
+    // GESTIÓN DE TURNOS AISLADOS (CAJERO)
     private var timestampInicioTurnoCajero: Long = 0L
     private var fechaInicioTurnoStr = ""
     private var horaInicioTurnoStr = ""
 
+    // ESTADO DE PRIVACIDAD Y FILTROS POR FECHA
     private var saldoOculto = false
     private var totalVentasFiltradas = 0.0
     private var cantidadVentasFiltradas = 0
     private var fechaSeleccionadaFiltro = ""
     private var esModoOscuro = false
 
-    private lateinit var txtEstadoLectorDiag: TextView
-    private lateinit var txtEstadoBateriaDiag: TextView
-    private lateinit var txtEstadoNotifDiag: TextView
+    private lateinit var badgeLectorStatus: TextView
+    private lateinit var badgeBateriaStatus: TextView
+    private lateinit var badgeNotifStatus: TextView
     private lateinit var txtBannerCodigoCajeros: TextView
     private lateinit var inCorreoRegistro: EditText
     private lateinit var inCorreoLoginDueño: EditText
@@ -142,13 +149,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         bannerSinInternet = TextView(this).apply {
-            text = "⚠️ Sin conexión a internet. Los cobros se actualizarán al reconectar."
-            textSize = 13f
+            text = "⚠️ Sin conexión a internet. Reconectando..."
+            textSize = 12f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#78350F"))
             setBackgroundColor(Color.parseColor("#FEF3C7"))
             gravity = Gravity.CENTER
-            setPadding(20, 12, 20, 12)
+            setPadding(16, 10, 16, 10)
             visibility = View.GONE
         }
 
@@ -159,7 +166,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         scrollOnboarding.addView(containerOnboarding)
 
-        // PANTALLA 1: PORTADA OFICIAL
+        // =========================================================================
+        // PANTALLA 1: PORTADA OFICIAL (YapeAlDía)
+        // =========================================================================
         layoutPortada = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val cardPortada = crearTarjetaFintech(this)
 
@@ -168,11 +177,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             adjustViewBounds = true
             scaleType = ImageView.ScaleType.FIT_CENTER
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 10, 0, 25)
+                setMargins(0, 10, 0, 20)
             }
         }
 
-        val btnDueño = crearBotonFintech(this, "👑 SOY EL DUEÑO\n(Administrador de Negocio)", COLOR_YAPE_PURPLE) {
+        val btnDueño = crearBotonFintech(this, "👑 SOY EL DUEÑO\n(Administrar Negocio)", COLOR_YAPE_PURPLE) {
             if (prefs.getBoolean("tienda_registrada", false)) {
                 pedirPinDueño(prefs) {
                     esSesionDueño = true
@@ -181,9 +190,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             } else {
                 mostrarOpcionesDueñoDialog()
             }
-        }.apply { textSize = 16f }
+        }.apply { textSize = 15f }
 
-        val btnCajeroPequeno = crearBotonFintech(this, "🛒 Soy Cajero (Entrar al Punto de Venta) - Clic aquí", COLOR_YAPE_CYAN) {
+        val btnCajeroPequeno = crearBotonFintech(this, "🛒 Soy Cajero (Entrar al Punto de Venta)", COLOR_YAPE_CYAN) {
             mostrarSeccion(layoutLoginCajero)
         }.apply {
             textSize = 14f
@@ -195,19 +204,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardPortada.addView(btnCajeroPequeno)
         layoutPortada.addView(cardPortada)
 
+        // =========================================================================
         // PANTALLA 2: REGISTRO DE DUEÑO
+        // =========================================================================
         layoutRegistroDueño = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardReg = crearTarjetaFintech(this)
 
         val titReg = TextView(this).apply {
             text = "Registro de Nuevo Negocio 👑"
-            textSize = 22f
+            textSize = 20f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
             setPadding(0, 0, 0, 15)
         }
 
-        val inNom = crearInputFintech(this, "Nombre de tu Negocio (Ej: Bodega Central)")
+        val inNom = crearInputFintech(this, "Nombre del Negocio (Ej: Bodega Central)")
         inCorreoRegistro = crearInputFintech(this, "Correo Gmail del Dueño")
 
         val btnGooglePickerReg = crearBotonFintech(this, "G Seleccionar mi Correo de Google", "#4285F4") {
@@ -243,7 +254,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
 
             val codGenerado = nom.replace(" ", "").take(5).uppercase() + "-" + (100..999).random()
-            Toast.makeText(this, "Validando registro...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Registrando negocio...", Toast.LENGTH_SHORT).show()
 
             CoroutineScope(Dispatchers.IO).launch {
                 try {
@@ -301,8 +312,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         val btnYaTengoCuentaLink = Button(this).apply {
-            text = "¿Ya tienes un negocio registrado? Inicia sesión aquí"
-            textSize = 14f
+            text = "¿Ya tienes cuenta? Inicia sesión aquí"
+            textSize = 13f
             setTextColor(Color.parseColor("#2563EB"))
             setBackgroundColor(Color.TRANSPARENT)
             setOnClickListener { mostrarSeccion(layoutLoginDueño) }
@@ -310,7 +321,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val btnVolverReg = Button(this).apply {
             text = "⬅️ Volver a la Portada"
-            textSize = 14f
+            textSize = 13f
             setOnClickListener { mostrarSeccion(layoutPortada) }
         }
 
@@ -325,13 +336,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardReg.addView(btnVolverReg)
         layoutRegistroDueño.addView(cardReg)
 
+        // =========================================================================
         // PANTALLA: LOGIN DE DUEÑO
+        // =========================================================================
         layoutLoginDueño = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardLoginDueño = crearTarjetaFintech(this)
 
         val titLogDueño = TextView(this).apply {
             text = "Iniciar Sesión como Dueño 👑"
-            textSize = 22f
+            textSize = 20f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
             setPadding(0, 0, 0, 15)
@@ -360,7 +373,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 return@crearBotonFintech
             }
 
-            Toast.makeText(this, "Recuperando datos de tu negocio...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Iniciando sesión...", Toast.LENGTH_SHORT).show()
 
             CoroutineScope(Dispatchers.IO).launch {
                 try {
@@ -397,7 +410,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             .apply()
 
                         runOnUiThread {
-                            Toast.makeText(this@MainActivity, "✅ ¡Bienvenido de nuevo, $nom!", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this@MainActivity, "✅ ¡Bienvenido, $nom!", Toast.LENGTH_LONG).show()
                             esSesionDueño = true
                             verificarAsistentePermisosOEntrar()
                         }
@@ -416,7 +429,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val btnOlvidoPinLogin = Button(this).apply {
             text = "¿Olvidaste tu PIN? Recupéralo por correo"
-            textSize = 14f
+            textSize = 13f
             setTextColor(Color.parseColor("#2563EB"))
             setBackgroundColor(Color.TRANSPARENT)
             setOnClickListener {
@@ -428,7 +441,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val btnVolverLoginDueño = Button(this).apply {
             text = "⬅️ Volver a la Portada"
-            textSize = 14f
+            textSize = 13f
             setOnClickListener { mostrarSeccion(layoutPortada) }
         }
 
@@ -441,13 +454,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardLoginDueño.addView(btnVolverLoginDueño)
         layoutLoginDueño.addView(cardLoginDueño)
 
+        // =========================================================================
         // PANTALLA: LOGIN DE CAJERO
+        // =========================================================================
         layoutLoginCajero = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardLogin = crearTarjetaFintech(this)
 
         val titLog = TextView(this).apply {
             text = "Acceso para Cajeros 🛒"
-            textSize = 22f
+            textSize = 20f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
             setPadding(0, 0, 0, 15)
@@ -531,7 +546,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val btnVolverLogin = Button(this).apply {
             text = "⬅️ Volver a la Portada"
-            textSize = 14f
+            textSize = 13f
             setOnClickListener { mostrarSeccion(layoutPortada) }
         }
 
@@ -543,7 +558,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardLogin.addView(btnVolverLogin)
         layoutLoginCajero.addView(cardLogin)
 
+        // =========================================================================
         // PANTALLA 3: BIENVENIDA
+        // =========================================================================
         layoutBienvenida = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardBienvenida = crearTarjetaFintech(this)
 
@@ -552,30 +569,30 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             adjustViewBounds = true
             scaleType = ImageView.ScaleType.FIT_CENTER
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 0, 0, 20)
+                setMargins(0, 0, 0, 15)
             }
         }
 
         val titBv = TextView(this).apply {
             text = "🎉 ¡Bienvenido a YapeAlDía!"
-            textSize = 24f
+            textSize = 22f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
-            setPadding(0, 0, 0, 10)
+            setPadding(0, 0, 0, 8)
         }
         val fraseBv = TextView(this).apply {
             text = "“¡Tu Yape ahora habla y administra tu negocio!”"
-            textSize = 16f
+            textSize = 15f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
-            background = crearBordeRedondo("#F3E8F7", "#D8B4E2", 16f)
-            setPadding(20, 16, 20, 16)
+            background = crearBordeRedondo("#F3E8F7", "#D8B4E2", 14f)
+            setPadding(18, 14, 18, 14)
         }
         val descBv = TextView(this).apply {
-            text = "\nConfiguraremos unos permisos rápidos para empezar a usar la app y garantizar que tus cobros se canten siempre a tiempo sin interrupciones."
-            textSize = 14f
+            text = "\nConfiguraremos unos permisos rápidos para asegurar que tus cobros se canten siempre a tiempo."
+            textSize = 13f
             setTextColor(Color.parseColor("#475569"))
-            setPadding(0, 0, 0, 25)
+            setPadding(0, 0, 0, 20)
         }
         val btnIniciarAsistente = crearBotonFintech(this, "Comenzar Configuración ➡️", COLOR_YAPE_PURPLE) {
             mostrarSeccion(layoutPermiso1Lector)
@@ -588,191 +605,145 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardBienvenida.addView(btnIniciarAsistente)
         layoutBienvenida.addView(cardBienvenida)
 
-        // ASISTENTE DE PERMISOS
+        // =========================================================================
+        // ASISTENTE DE PERMISOS (MICRO-TEXTOS CLAROS Y SEGUROS)
+        // =========================================================================
+        
+        // PASO 1
         layoutPermiso1Lector = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardP1 = crearTarjetaFintech(this)
         val titP1 = TextView(this).apply {
-            text = "🔔 Paso 1 de 3: Lector de Notificaciones"
-            textSize = 20f
+            text = "🔔 Paso 1 de 3: Lector de Pagos"
+            textSize = 18f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
-            setPadding(0, 0, 0, 10)
+            setPadding(0, 0, 0, 8)
         }
         val descP1 = TextView(this).apply {
-            text = "🔒 ¿Por qué es 100% seguro y necesario?\n\nYapeAlDía NO tiene acceso a tus cuentas bancarias, NO puede mover tu dinero ni te pedirá jamás contraseñas de Yape ni tarjetas.\n\nSolo lee el aviso de pago que llega a la pantalla para que el celular cante el monto por el altavoz y lo guarde automáticamente en tu reporte contable."
-            textSize = 14f
+            text = "🔒 100% Seguro: YapeAlDía NO toca tu dinero ni pide claves bancarias. Solo escucha el aviso para cantar el cobro por el altavoz y anotarlo en tu reporte."
+            textSize = 13f
             setTextColor(Color.parseColor("#475569"))
             background = crearBordeRedondo("#F8FAFC", "#E2E8F0", 14f)
-            setPadding(20, 16, 20, 16)
-        }
-        val txtClicActivar1 = TextView(this).apply {
-            text = "👉 Clic para activar:"
-            textSize = 14f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.parseColor("#0F172A"))
-            setPadding(0, 12, 0, 4)
+            setPadding(18, 14, 18, 14)
         }
         val btnActivarP1 = crearBotonFintech(this, "ACTIVAR LECTOR DE NOTIFICACIONES", COLOR_YAPE_PURPLE) {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-        }.apply { textSize = 15f }
+        }.apply { textSize = 14f }
 
         val btnAyudaRestringidos = Button(this).apply {
             text = "⚠️ ¿Te sale 'Ajuste restringido'? Toca aquí para desbloquear"
-            textSize = 13f
+            textSize = 12f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#B45309"))
-            background = crearBordeRedondo("#FEF3C7", "#FDE68A", 14f)
-            setPadding(20, 14, 20, 14)
+            background = crearBordeRedondo("#FEF3C7", "#FDE68A", 12f)
+            setPadding(16, 12, 16, 12)
             setOnClickListener { mostrarDialogoAjustesRestringidos() }
         }
         val btnSigP1 = crearBotonFintech(this, "Siguiente Paso ➡️", COLOR_YAPE_CYAN) {
             mostrarSeccion(layoutPermiso2Alertas)
         }.apply { setTextColor(Color.parseColor("#0F172A")) }
 
-        val txtAdvertencia1 = TextView(this).apply {
-            text = "⚠️ Es necesario activar este permiso para que la app funcione correctamente."
-            textSize = 13f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.parseColor("#DC2626"))
-            gravity = Gravity.CENTER
-            setPadding(0, 12, 0, 0)
-        }
-
         cardP1.addView(titP1)
         cardP1.addView(descP1)
-        cardP1.addView(txtClicActivar1)
         cardP1.addView(btnActivarP1)
         cardP1.addView(btnAyudaRestringidos)
         cardP1.addView(btnSigP1)
-        cardP1.addView(txtAdvertencia1)
         layoutPermiso1Lector.addView(cardP1)
 
+        // PASO 2
         layoutPermiso2Alertas = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardP2 = crearTarjetaFintech(this)
         val titP2 = TextView(this).apply {
             text = "📲 Paso 2 de 3: Alertas en Pantalla"
-            textSize = 20f
+            textSize = 18f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
-            setPadding(0, 0, 0, 10)
+            setPadding(0, 0, 0, 8)
         }
         val descP2 = TextView(this).apply {
-            text = "🔔 ¿Por qué es necesario?\n\nPermite que tu teléfono vibre y muestre la tarjeta del cobro en la barra superior incluso cuando la pantalla esté apagada o cuando estés fuera del negocio."
-            textSize = 14f
+            text = "🔔 Necesario para que tu teléfono vibre y muestre el pago en la barra de notificaciones incluso con la pantalla apagada."
+            textSize = 13f
             setTextColor(Color.parseColor("#475569"))
             background = crearBordeRedondo("#F8FAFC", "#E2E8F0", 14f)
-            setPadding(20, 16, 20, 16)
-        }
-        val txtClicActivar2 = TextView(this).apply {
-            text = "👉 Clic para activar:"
-            textSize = 14f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.parseColor("#0F172A"))
-            setPadding(0, 12, 0, 4)
+            setPadding(18, 14, 18, 14)
         }
         val btnActivarP2 = crearBotonFintech(this, "ACTIVAR NOTIFICACIONES", COLOR_YAPE_PURPLE) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
             } else {
-                Toast.makeText(this, "Las notificaciones ya están activas en tu sistema.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Las notificaciones ya están activas.", Toast.LENGTH_SHORT).show()
             }
-        }.apply { textSize = 15f }
+        }.apply { textSize = 14f }
 
         val btnSigP2 = crearBotonFintech(this, "Siguiente Paso ➡️", COLOR_YAPE_CYAN) {
             mostrarSeccion(layoutPermiso3Bateria)
         }.apply { setTextColor(Color.parseColor("#0F172A")) }
 
-        val txtAdvertencia2 = TextView(this).apply {
-            text = "⚠️ Es necesario activar este permiso para que la app funcione correctamente."
-            textSize = 13f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.parseColor("#DC2626"))
-            gravity = Gravity.CENTER
-            setPadding(0, 12, 0, 0)
-        }
-
         cardP2.addView(titP2)
         cardP2.addView(descP2)
-        cardP2.addView(txtClicActivar2)
         cardP2.addView(btnActivarP2)
         cardP2.addView(btnSigP2)
-        cardP2.addView(txtAdvertencia2)
         layoutPermiso2Alertas.addView(cardP2)
 
+        // PASO 3
         layoutPermiso3Bateria = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardP3 = crearTarjetaFintech(this)
         val titP3 = TextView(this).apply {
             text = "🔋 Paso 3 de 3: Batería Sin Restricciones"
-            textSize = 20f
+            textSize = 18f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
-            setPadding(0, 0, 0, 10)
+            setPadding(0, 0, 0, 8)
         }
         val descP3 = TextView(this).apply {
-            text = "⚡ ¿Por qué es necesario?\n\nTeléfonos como Samsung, Xiaomi, Huawei o Motorola apagan las apps en segundo plano para ahorrar energía. Al optimizarla para segundo plano, YapeAlDía estará despierta todo el día para cantar y anotar cada venta sin interrupciones."
-            textSize = 14f
+            text = "⚡ Evita que marcas como Samsung o Xiaomi pausen la app. Estará despierta todo el día para cantar cada venta."
+            textSize = 13f
             setTextColor(Color.parseColor("#475569"))
             background = crearBordeRedondo("#F8FAFC", "#E2E8F0", 14f)
-            setPadding(20, 16, 20, 16)
-        }
-        val txtClicActivar3 = TextView(this).apply {
-            text = "👉 Clic para activar:"
-            textSize = 14f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.parseColor("#0F172A"))
-            setPadding(0, 12, 0, 4)
+            setPadding(18, 14, 18, 14)
         }
         val btnActivarP3 = crearBotonFintech(this, "OPTIMIZA BATERÍA PARA LA APP", COLOR_YAPE_PURPLE) {
             solicitarSinRestriccionesBateria()
-        }.apply { textSize = 15f }
+        }.apply { textSize = 14f }
 
         val btnFinalizarWizard = crearBotonFintech(this, "Finalizar y Entrar a la App 🚀", COLOR_YAPE_CYAN) {
             prefs.edit().putBoolean("asistente_permisos_listo", true).apply()
             entrarDirectoAlSistema()
         }.apply { setTextColor(Color.parseColor("#0F172A")) }
 
-        val txtAdvertencia3 = TextView(this).apply {
-            text = "⚠️ Es necesario activar este permiso para que la app funcione correctamente."
-            textSize = 13f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.parseColor("#DC2626"))
-            gravity = Gravity.CENTER
-            setPadding(0, 12, 0, 0)
-        }
-
         cardP3.addView(titP3)
         cardP3.addView(descP3)
-        cardP3.addView(txtClicActivar3)
         cardP3.addView(btnActivarP3)
         cardP3.addView(btnFinalizarWizard)
-        cardP3.addView(txtAdvertencia3)
         layoutPermiso3Bateria.addView(cardP3)
 
-        // PANTALLA PRINCIPAL
+        // =========================================================================
+        // PANTALLA PRINCIPAL CON NAVEGACIÓN Y TECLADO TÁCTIL POS
+        // =========================================================================
         layoutAppPrincipal = RelativeLayout(this).apply { visibility = View.GONE }
 
         scrollPrincipal = ScrollView(this).apply {
-            setPadding(30, 10, 30, 180)
+            setPadding(25, 10, 25, 170)
             clipToPadding = false
         }
         val containerTabs = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scrollPrincipal.addView(containerTabs)
 
-        // PESTAÑA 1: CAJA / POS
+        // --- PESTAÑA 1: CAJA / POS (TECLADO NUMÉRICO INTEGRADO) ---
         tabCajaPOS = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val barraSubCaja = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, 12)
+            setPadding(0, 0, 0, 10)
         }
         txtInfoCajero = TextView(this).apply {
-            textSize = 14f
+            textSize = 13f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A"))
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         switchVozCaja = Switch(this).apply {
-            text = "🔊 Voz "
+            text = "🔊 "
             textSize = 14f
             setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A"))
             isChecked = prefs.getBoolean("voz_activa", true)
@@ -782,11 +753,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         val btnCerrarSesionCajero = Button(this).apply {
             text = "CERRAR SESIÓN"
-            textSize = 11f
+            textSize = 10f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.WHITE)
-            background = crearBordeRedondo("#DC2626", "#DC2626", 14f)
-            setPadding(18, 10, 18, 10)
+            background = crearBordeRedondo("#DC2626", "#DC2626", 12f)
+            setPadding(14, 8, 14, 8)
             setOnClickListener { confirmarCierreDeTurno() }
         }
         barraSubCaja.addView(txtInfoCajero)
@@ -796,28 +767,28 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         // FILTRO DE FECHAS (CALENDARIO)
         cardFiltroFechas = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", "#E2E8F0", 16f)
-            setPadding(16, 12, 16, 12)
-            elevation = 6f
+            background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", "#E2E8F0", 14f)
+            setPadding(14, 10, 14, 10)
+            elevation = 4f
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 0, 0, 12)
+                setMargins(0, 0, 0, 10)
             }
         }
         txtTituloPeriodo = TextView(this).apply {
             text = "📅 Período: Ventas de Hoy"
-            textSize = 13f
+            textSize = 12f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
-            setPadding(4, 0, 4, 8)
+            setPadding(2, 0, 2, 6)
         }
         val rowBotonesFechas = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
 
         btnFiltroHoy = Button(this).apply {
             text = "Hoy"
-            textSize = 12f
-            background = crearBordeRedondo(COLOR_YAPE_PURPLE, COLOR_YAPE_PURPLE, 12f)
+            textSize = 11f
+            background = crearBordeRedondo(COLOR_YAPE_PURPLE, COLOR_YAPE_PURPLE, 10f)
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(4, 0, 4, 0) }
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(2, 0, 2, 0) }
             setOnClickListener {
                 fechaSeleccionadaFiltro = ""
                 txtTituloPeriodo.text = "📅 Período: Ventas de Hoy"
@@ -827,10 +798,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         btnFiltroAyer = Button(this).apply {
             text = "Ayer"
-            textSize = 12f
-            background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 12f)
+            textSize = 11f
+            background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 10f)
             setTextColor(Color.parseColor("#475569"))
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(4, 0, 4, 0) }
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(2, 0, 2, 0) }
             setOnClickListener {
                 val cal = Calendar.getInstance().apply { add(Calendar.DATE, -1) }
                 fechaSeleccionadaFiltro = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(cal.time)
@@ -840,11 +811,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         btnFiltroCalendario = Button(this).apply {
-            text = "📆 Elegir Día"
-            textSize = 12f
-            background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 12f)
+            text = "📆 Calendario"
+            textSize = 11f
+            background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 10f)
             setTextColor(Color.parseColor("#475569"))
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.3f).apply { setMargins(4, 0, 4, 0) }
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f).apply { setMargins(2, 0, 2, 0) }
             setOnClickListener { abrirSelectorCalendario() }
         }
 
@@ -856,11 +827,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val cardTotal = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = crearBordeRedondo("#F3E8F7", "#D8B4E2", 22f)
-            setPadding(28, 22, 28, 22)
-            elevation = 10f
+            background = crearBordeRedondo("#F3E8F7", "#D8B4E2", 18f)
+            setPadding(20, 16, 20, 16)
+            elevation = 6f
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 0, 0, 16)
+                setMargins(0, 0, 0, 12)
             }
         }
         val barraTotalHeader = LinearLayout(this).apply {
@@ -868,17 +839,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             gravity = Gravity.CENTER_VERTICAL
         }
         val lblT = TextView(this).apply {
-            text = "TOTAL RECAUDADO"
-            textSize = 13f
+            text = "TOTAL DEL PERÍODO"
+            textSize = 11f
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
             setTypeface(null, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         btnOcultarSaldo = Button(this).apply {
             text = "👁️"
-            textSize = 15f
-            background = crearBordeRedondo("#FFFFFF", "#D8B4E2", 14f)
-            setPadding(14, 8, 14, 8)
+            textSize = 14f
+            background = crearBordeRedondo("#FFFFFF", "#D8B4E2", 12f)
+            setPadding(10, 6, 10, 6)
             setOnClickListener {
                 saldoOculto = !saldoOculto
                 actualizarVistaSaldo()
@@ -886,9 +857,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         val btnRefreshCaja = Button(this).apply {
             text = "🔄"
-            textSize = 15f
-            background = crearBordeRedondo("#FFFFFF", "#D8B4E2", 14f)
-            setPadding(14, 8, 14, 8)
+            textSize = 14f
+            background = crearBordeRedondo("#FFFFFF", "#D8B4E2", 12f)
+            setPadding(10, 6, 10, 6)
             setOnClickListener {
                 Toast.makeText(this@MainActivity, "Actualizando...", Toast.LENGTH_SHORT).show()
                 consultarCobrosServidorUnaVez()
@@ -900,76 +871,102 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         txtTotalHoyCaja = TextView(this).apply {
             text = "S/ 0.00"
-            textSize = 34f
+            textSize = 30f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
-            setPadding(0, 8, 0, 0)
+            setPadding(0, 4, 0, 0)
         }
         cardTotal.addView(barraTotalHeader)
         cardTotal.addView(txtTotalHoyCaja)
 
+        // TARJETA POS CON TECLADO NUMÉRICO TÁCTIL (SIN ABRIR TECLADO DE ANDROID)
         val cardCobroPOS = crearTarjetaFintech(this)
-        inMontoPOS = EditText(this).apply {
-            hint = "S/ 0.00"
-            textSize = 30f
+        
+        txtMontoDisplayPOS = TextView(this).apply {
+            text = "S/ 0.00"
+            textSize = 36f
             setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
             gravity = Gravity.CENTER
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
-            background = crearBordeRedondo(if (esModoOscuro) "#0F172A" else "#F8FAFC", "#CBD5E1", 16f)
-            setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A"))
-            setPadding(20, 20, 20, 20)
+            setPadding(0, 10, 0, 10)
         }
+
+        // Teclado Numérico
+        val layoutTeclado = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(10, 0, 10, 10)
+        }
+
+        fun crearFilaTeclado(b1: String, b2: String, b3: String): LinearLayout {
+            return LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                weightSum = 3f
+                setPadding(0, 4, 0, 4)
+                addView(crearBotonTeclado(b1))
+                addView(crearBotonTeclado(b2))
+                addView(crearBotonTeclado(b3))
+            }
+        }
+
+        layoutTeclado.addView(crearFilaTeclado("1", "2", "3"))
+        layoutTeclado.addView(crearFilaTeclado("4", "5", "6"))
+        layoutTeclado.addView(crearFilaTeclado("7", "8", "9"))
+        layoutTeclado.addView(crearFilaTeclado("C", "0", "⌫"))
+
         imgQrPOS = ImageView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(500, 500).apply {
+            layoutParams = LinearLayout.LayoutParams(450, 450).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
-                setMargins(0, 15, 0, 10)
+                setMargins(0, 10, 0, 10)
             }
             visibility = View.GONE
         }
         txtMontoQrPOS = TextView(this).apply {
-            textSize = 20f
+            textSize = 18f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
             gravity = Gravity.CENTER
             visibility = View.GONE
         }
-        val btnGenerarQr = crearBotonFintech(this, "⚡ Mostrar QR de Cobro", COLOR_YAPE_PURPLE) {
-            val monto = inMontoPOS.text.toString().trim()
-            if (monto.isEmpty()) {
-                Toast.makeText(this, "Ingresa un monto primero", Toast.LENGTH_SHORT).show()
+
+        val btnGenerarQr = crearBotonFintech(this, "⚡ MOSTRAR QR DE COBRO", COLOR_YAPE_PURPLE) {
+            val montoVal = montoTecladoPOS.toDoubleOrNull() ?: 0.0
+            if (montoVal <= 0.0) {
+                Toast.makeText(this, "Digita un monto en el teclado", Toast.LENGTH_SHORT).show()
                 return@crearBotonFintech
             }
             val qrBase = prefs.getString("qr_base_yape", "") ?: ""
             if (qrBase.isEmpty()) {
-                Toast.makeText(this, "El dueño debe configurar el QR en la pestaña Cajeros", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Configura tu QR de Yape en Cajeros", Toast.LENGTH_LONG).show()
                 return@crearBotonFintech
             }
-            val bmp = generarBitmapQr(qrBase, 500, 500)
+            val bmp = generarBitmapQr(qrBase, 450, 450)
             if (bmp != null) {
                 imgQrPOS.setImageBitmap(bmp)
                 imgQrPOS.visibility = View.VISIBLE
-                txtMontoQrPOS.text = "Monto a pagar: S/ $monto"
+                txtMontoQrPOS.text = "Escanea y paga: S/ " + String.format(Locale.US, "%.2f", montoVal)
                 txtMontoQrPOS.visibility = View.VISIBLE
             }
-        }.apply { textSize = 16f }
+        }.apply { textSize = 15f }
 
-        cardCobroPOS.addView(inMontoPOS)
+        cardCobroPOS.addView(txtMontoDisplayPOS)
+        cardCobroPOS.addView(layoutTeclado)
         cardCobroPOS.addView(btnGenerarQr)
         cardCobroPOS.addView(imgQrPOS)
         cardCobroPOS.addView(txtMontoQrPOS)
 
+        // HISTORIAL RESUMIDO
         val cardHistorialCaja = crearTarjetaFintech(this)
         val titHist = TextView(this).apply {
-            text = "📋 Cobros del Turno en Vivo:"
-            textSize = 17f
+            text = "📋 Cobros Recientes del Turno:"
+            textSize = 15f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A"))
-            setPadding(0, 0, 0, 10)
+            setPadding(0, 0, 0, 8)
         }
         layoutListaCobrosCaja = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val btnCompartirCuadreWsp = crearBotonFintech(this, "📲 Enviar Cuadre de Caja por WhatsApp", "#25D366") {
+        val btnCompartirCuadreWsp = crearBotonFintech(this, "📲 Enviar Cuadre por WhatsApp", "#25D366") {
             enviarCuadrePorWhatsApp()
-        }
+        }.apply { textSize = 13f }
 
         cardHistorialCaja.addView(titHist)
         cardHistorialCaja.addView(layoutListaCobrosCaja)
@@ -981,12 +978,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         tabCajaPOS.addView(cardCobroPOS)
         tabCajaPOS.addView(cardHistorialCaja)
 
-        // PESTAÑA 2: CAJEROS
+        // --- PESTAÑA 2: CAJEROS (LIMPIA Y ORDENADA) ---
         tabCajeros = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        
         val cardCodCaja = crearTarjetaFintech(this)
         val titCodCaja = TextView(this).apply {
-            text = "Configuración de Caja 🏪"
-            textSize = 18f
+            text = "Punto de Caja para Celulares 🏪"
+            textSize = 16f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
         }
@@ -994,20 +992,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             textSize = 24f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#1D4ED8"))
-            setPadding(0, 6, 0, 8)
+            setPadding(0, 4, 0, 4)
         }
         val descCodCaja = TextView(this).apply {
-            text = "Este código le servirá para agregar un punto de caja en otro celular:"
-            textSize = 13f
-            setTextColor(Color.parseColor("#475569"))
-            setPadding(0, 0, 0, 12)
+            text = "Ingresa este código en el celular del cajero para vincularlo a tu negocio:"
+            textSize = 12f
+            setTextColor(Color.parseColor("#64748B"))
+            setPadding(0, 0, 0, 8)
         }
-        val btnCopiarCodCaja = crearBotonFintech(this, "📋 Copiar Código de Tienda", COLOR_YAPE_PURPLE) {
+        val btnCopiarCodCaja = crearBotonFintech(this, "📋 Copiar Código", COLOR_YAPE_PURPLE) {
             val cod = prefs.getString("codigo_tienda", "") ?: ""
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("Codigo Tienda", cod))
             Toast.makeText(this, "Código copiado: $cod", Toast.LENGTH_SHORT).show()
-        }
+        }.apply { textSize = 13f }
+
         cardCodCaja.addView(titCodCaja)
         cardCodCaja.addView(txtBannerCodigoCajeros)
         cardCodCaja.addView(descCodCaja)
@@ -1016,14 +1015,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val cardCajeros = crearTarjetaFintech(this)
         val titGestCaj = TextView(this).apply {
-            text = "👥 Gestión de Cajeros (Otros Celulares):"
-            textSize = 18f
+            text = "👥 Cajeros Autorizados:"
+            textSize = 16f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
-            setPadding(0, 0, 0, 10)
+            setPadding(0, 0, 0, 8)
         }
-        val inNomCaj = crearInputFintech(this, "Nombre del Cajero (Ej: María López)")
-        val inPinCaj = crearInputFintech(this, "PIN para este Cajero (4 dígitos)").apply {
+        val inNomCaj = crearInputFintech(this, "Nombre del Cajero (Ej: Carlos)")
+        val inPinCaj = crearInputFintech(this, "PIN (4 dígitos)").apply {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER
         }
         val btnGuardarCaj = crearBotonFintech(this, "➕ Crear Cajero Nuevo", COLOR_YAPE_PURPLE) {
@@ -1052,7 +1051,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             } else {
                 Toast.makeText(this, "Ingresa nombre y PIN de mín. 4 números", Toast.LENGTH_SHORT).show()
             }
-        }
+        }.apply { textSize = 13f }
+
         layoutListaCajerosAdmin = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         cardCajeros.addView(titGestCaj)
         cardCajeros.addView(inNomCaj)
@@ -1064,18 +1064,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val cardSoloLectura = crearTarjetaFintech(this)
         val titSoloLectura = TextView(this).apply {
             text = "🔒 Compartir Reporte en Solo Lectura"
-            textSize = 17f
+            textSize = 15f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#15803D"))
         }
-        val descSoloLectura = TextView(this).apply {
-            text = "Permite a tu personal o contador revisar las ventas desde su celular sin poder alterar fórmulas ni datos:"
-            textSize = 13f
-            setTextColor(Color.parseColor("#475569"))
-            setPadding(0, 4, 0, 10)
-        }
         val inCorreoLectura = crearInputFintech(this, "Correo Gmail del personal")
-        val btnCompartirLectura = crearBotonFintech(this, "Compartir Reporte en Solo Lectura", "#15803D") {
+        val btnCompartirLectura = crearBotonFintech(this, "Compartir Reporte", "#15803D") {
             val cor = inCorreoLectura.text.toString().trim()
             val cod = prefs.getString("codigo_tienda", "") ?: ""
             if (cor.isEmpty() || !cor.contains("@")) {
@@ -1098,15 +1092,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         if (resJson.optString("status") == "exito") {
                             Toast.makeText(this@MainActivity, "Acceso concedido a $cor", Toast.LENGTH_LONG).show()
                             inCorreoLectura.setText("")
-                        } else {
-                            Toast.makeText(this@MainActivity, "Error: ${resJson.optString("mensaje")}", Toast.LENGTH_SHORT).show()
                         }
                     }
                 } catch (e: Exception) {}
             }
-        }
+        }.apply { textSize = 13f }
         cardSoloLectura.addView(titSoloLectura)
-        cardSoloLectura.addView(descSoloLectura)
         cardSoloLectura.addView(inCorreoLectura)
         cardSoloLectura.addView(btnCompartirLectura)
         tabCajeros.addView(cardSoloLectura)
@@ -1114,27 +1105,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val cardConfigQr = crearTarjetaFintech(this)
         val titQrConfig = TextView(this).apply {
             text = "📸 Configurar mi Código QR de Yape"
-            textSize = 17f
+            textSize = 15f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
         }
-        val descQrConfig = TextView(this).apply {
-            text = "¿Por qué es necesario?\nPara que la pantalla de cobro de tus cajeros muestre tu QR oficial a los clientes y paguen directamente a tu cuenta sin equivocarse de número ni de titular."
-            textSize = 13f
-            setTextColor(Color.parseColor("#475569"))
-            setPadding(0, 6, 0, 8)
-        }
         val btnVideoTutorial = Button(this).apply {
-            text = "▶️ Ver Video Tutorial: Cómo obtener el texto de mi QR"
-            textSize = 13f
+            text = "▶️ Ver Video Tutorial: Cómo obtener mi código QR"
+            textSize = 12f
             setTextColor(Color.parseColor("#2563EB"))
             setBackgroundColor(Color.TRANSPARENT)
-            setPadding(0, 0, 0, 8)
+            setPadding(0, 0, 0, 6)
             setOnClickListener {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=como+obtener+texto+codigo+qr+yape")))
             }
         }
-        inQrConfigTabCajeros = crearInputFintech(this, "Pega aquí el texto de tu QR (000201...)").apply {
+        inQrConfigTabCajeros = crearInputFintech(this, "Pega el texto de tu QR (000201...)").apply {
             setText(prefs.getString("qr_base_yape", ""))
         }
         val btnGuardarQr = crearBotonFintech(this, "Guardar mi QR de Yape 💾", COLOR_YAPE_PURPLE) {
@@ -1142,7 +1127,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val cod = prefs.getString("codigo_tienda", "") ?: ""
             if (qrRaw.isNotEmpty()) {
                 prefs.edit().putString("qr_base_yape", qrRaw).apply()
-
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
                         val json = JSONObject().apply {
@@ -1155,115 +1139,85 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         client.newCall(req).execute().close()
                     } catch (e: Exception) {}
                 }
-
-                Toast.makeText(this, "✅ QR de Yape guardado permanentemente en la nube", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(this, "Pega un código de QR válido", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "✅ QR guardado en la nube", Toast.LENGTH_SHORT).show()
             }
-        }
+        }.apply { textSize = 13f }
         cardConfigQr.addView(titQrConfig)
-        cardConfigQr.addView(descQrConfig)
         cardConfigQr.addView(btnVideoTutorial)
         cardConfigQr.addView(inQrConfigTabCajeros)
         cardConfigQr.addView(btnGuardarQr)
         tabCajeros.addView(cardConfigQr)
 
-        // PESTAÑA 3: AJUSTES
+        // --- PESTAÑA 3: AJUSTES (DIAGNÓSTICO EJECUTIVO CON PÍLDORAS) ---
         tabConfiguracion = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardConfig = crearTarjetaFintech(this)
 
-        val cardDiagnostico = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = crearBordeRedondo("#F3E8F7", "#D8B4E2", 18f)
-            setPadding(22, 18, 22, 18)
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 0, 0, 16)
-            }
-        }
         val titDiag = TextView(this).apply {
-            text = "APP OPTIMIZADA CORRECTAMENTE"
-            textSize = 16f
+            text = "ESTADO DEL SISTEMA"
+            textSize = 14f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
             setPadding(0, 0, 0, 8)
         }
-        txtEstadoLectorDiag = TextView(this).apply {
-            textSize = 14f
-            setTypeface(null, Typeface.BOLD)
-            setPadding(0, 4, 0, 4)
-            setOnClickListener { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+
+        // Píldoras de estado
+        val rowBadges = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, 10)
         }
-        txtEstadoBateriaDiag = TextView(this).apply {
-            textSize = 14f
-            setTypeface(null, Typeface.BOLD)
-            setPadding(0, 4, 0, 4)
-            setOnClickListener { solicitarSinRestriccionesBateria() }
+        badgeLectorStatus = crearPildoraEstado("Lector Yape/Plin") {
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
         }
-        txtEstadoNotifDiag = TextView(this).apply {
-            textSize = 14f
-            setTypeface(null, Typeface.BOLD)
-            setPadding(0, 4, 0, 10)
-            setOnClickListener {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
-                }
+        badgeBateriaStatus = crearPildoraEstado("Segundo Plano 24/7") {
+            solicitarSinRestriccionesBateria()
+        }
+        badgeNotifStatus = crearPildoraEstado("Alertas de Cobro") {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
             }
         }
-        val txtRecordatorioDiag = TextView(this).apply {
-            text = "ℹ️ Recuerda que tienes que estar optimizado para que lleguen las notificaciones por audio y tener el control total de tu negocio."
-            textSize = 13f
-            setTextColor(Color.parseColor("#475569"))
-            setPadding(0, 4, 0, 0)
-        }
-        cardDiagnostico.addView(titDiag)
-        cardDiagnostico.addView(txtEstadoLectorDiag)
-        cardDiagnostico.addView(txtEstadoBateriaDiag)
-        cardDiagnostico.addView(txtEstadoNotifDiag)
-        cardDiagnostico.addView(txtRecordatorioDiag)
+        rowBadges.addView(badgeLectorStatus)
+        rowBadges.addView(badgeBateriaStatus)
+        rowBadges.addView(badgeNotifStatus)
 
         btnModoOscuroAjustes = crearBotonFintech(this, if (esModoOscuro) "☀️ Cambiar a Modo Claro" else "🌙 Cambiar a Modo Oscuro", if (esModoOscuro) "#334155" else "#F1F5F9") {
             esModoOscuro = !esModoOscuro
             prefs.edit().putBoolean("modo_oscuro", esModoOscuro).putInt("restaurar_pestaña", 3).apply()
             recreate()
         }.apply {
+            textSize = 13f
             setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A"))
-        }
-
-        val titTuCuenta = TextView(this).apply {
-            text = "TU CUENTA"
-            textSize = 16f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A"))
-            setPadding(0, 14, 0, 8)
         }
 
         val btnCambiarPin = crearBotonFintech(this, "🔑 Cambiar mi PIN de Dueño", COLOR_YAPE_PURPLE) {
             dialogCambiarPin(prefs)
-        }
+        }.apply { textSize = 13f }
 
-        val btnAbrirSheet = crearBotonFintech(this, "📊 Abrir el Registro de mi Negocio en Vivo", COLOR_YAPE_PURPLE) {
+        val btnAbrirSheet = crearBotonFintech(this, "📊 Abrir Registro en Google Sheets", COLOR_YAPE_PURPLE) {
             val url = prefs.getString("sheet_url_cliente", "") ?: ""
             if (url.isNotEmpty()) startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-            else Toast.makeText(this, "Revisa el enlace enviado a tu correo", Toast.LENGTH_SHORT).show()
-        }
+        }.apply { textSize = 13f }
 
         val btnProbarAudio = crearBotonFintech(this, "🔊 Probar Sonido de Caja", COLOR_YAPE_CYAN) {
             probarAudioCaja()
-        }.apply { setTextColor(Color.parseColor("#0F172A")) }
+        }.apply {
+            textSize = 13f
+            setTextColor(Color.parseColor("#0F172A"))
+        }
 
-        val btnSoporte = crearBotonFintech(this, "💬 Contactar a Soporte por WhatsApp", "#25D366") {
+        val btnSoporte = crearBotonFintech(this, "💬 Soporte por WhatsApp", "#25D366") {
             val cod = prefs.getString("codigo_tienda", "")
             val nom = prefs.getString("nombre_tienda", "")
             val mensaje = "Hola Soporte YapeAlDía, necesito ayuda con mi negocio $nom (Código: $cod)."
             val url = "https://api.whatsapp.com/send?phone=$NUMERO_SOPORTE_WSP&text=" + Uri.encode(mensaje)
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-        }
+        }.apply { textSize = 13f }
 
         val btnPolitica = Button(this).apply {
-            text = "📄 Política de Privacidad y Seguridad"
+            text = "📄 Política de Privacidad"
             setTextColor(Color.parseColor("#2563EB"))
             setBackgroundColor(Color.TRANSPARENT)
-            textSize = 13f
+            textSize = 12f
             setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(URL_POLITICA_PRIVACIDAD))) }
         }
 
@@ -1271,9 +1225,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             text = "CERRAR SESIÓN"
             setTextColor(Color.parseColor("#DC2626"))
             setBackgroundColor(Color.TRANSPARENT)
-            textSize = 15f
+            textSize = 14f
             setTypeface(null, Typeface.BOLD)
-            setPadding(0, 20, 0, 10)
+            setPadding(0, 16, 0, 10)
             setOnClickListener {
                 jobSincronizador?.cancel()
                 prefs.edit().putBoolean("cajero_logueado", false).apply()
@@ -1281,9 +1235,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
         }
 
-        cardConfig.addView(cardDiagnostico)
+        cardConfig.addView(titDiag)
+        cardConfig.addView(rowBadges)
         cardConfig.addView(btnModoOscuroAjustes)
-        cardConfig.addView(titTuCuenta)
         cardConfig.addView(btnCambiarPin)
         cardConfig.addView(btnAbrirSheet)
         cardConfig.addView(btnProbarAudio)
@@ -1296,23 +1250,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         containerTabs.addView(tabCajeros)
         containerTabs.addView(tabConfiguracion)
 
+        // BARRA DE NAVEGACIÓN INFERIOR (DOCK)
         barraNavegacionInferior = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", if (esModoOscuro) "#334155" else "#E2E8F0", 30f)
-            elevation = 20f
-            setPadding(20, 14, 20, 14)
+            background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", if (esModoOscuro) "#334155" else "#E2E8F0", 28f)
+            elevation = 16f
+            setPadding(16, 10, 16, 10)
             layoutParams = RelativeLayout.LayoutParams(
                 RelativeLayout.LayoutParams.MATCH_PARENT,
                 RelativeLayout.LayoutParams.WRAP_CONTENT
             ).apply {
                 addRule(RelativeLayout.ALIGN_PARENT_BOTTOM)
-                setMargins(40, 0, 40, 35)
+                setMargins(40, 0, 40, 25)
             }
         }
 
         btnNavCaja = Button(this).apply {
             text = "🛒 Cobro"
-            textSize = 14f
+            textSize = 13f
             setTypeface(null, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { seleccionarPestaña(1) }
@@ -1320,7 +1275,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         btnNavCajeros = Button(this).apply {
             text = "👥 Cajeros"
-            textSize = 14f
+            textSize = 13f
             setTypeface(null, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { seleccionarPestaña(2) }
@@ -1328,7 +1283,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         btnNavConfig = Button(this).apply {
             text = "⚙️ Ajustes"
-            textSize = 14f
+            textSize = 13f
             setTypeface(null, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { seleccionarPestaña(3) }
@@ -1380,6 +1335,58 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             entrarDirectoAlSistema()
         } else {
             mostrarSeccion(layoutPortada)
+        }
+    }
+
+    // =========================================================================
+    // LÓGICA DEL TECLADO NUMÉRICO TÁCTIL POS
+    // =========================================================================
+    private fun crearBotonTeclado(tecla: String): Button {
+        return Button(this).apply {
+            text = tecla
+            textSize = 20f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A"))
+            background = crearBordeRedondo(if (esModoOscuro) "#334155" else "#F1F5F9", "#CBD5E1", 14f)
+            layoutParams = LinearLayout.LayoutParams(0, 110, 1f).apply {
+                setMargins(4, 4, 4, 4)
+            }
+            setOnClickListener {
+                when (tecla) {
+                    "C" -> {
+                        montoTecladoPOS = ""
+                    }
+                    "⌫" -> {
+                        if (montoTecladoPOS.isNotEmpty()) {
+                            montoTecladoPOS = montoTecladoPOS.substring(0, montoTecladoPOS.length - 1)
+                        }
+                    }
+                    else -> {
+                        if (montoTecladoPOS.length < 7) {
+                            montoTecladoPOS += tecla
+                        }
+                    }
+                }
+                actualizarDisplayPOS()
+            }
+        }
+    }
+
+    private fun actualizarDisplayPOS() {
+        val montoVal = montoTecladoPOS.toDoubleOrNull() ?: 0.0
+        txtMontoDisplayPOS.text = if (montoTecladoPOS.isEmpty()) "S/ 0.00" else String.format(Locale.US, "S/ %.2f", montoVal)
+    }
+
+    private fun crearPildoraEstado(nombre: String, onClick: () -> Unit): TextView {
+        return TextView(this).apply {
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(16, 10, 16, 10)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 4, 0, 4) }
+            setOnClickListener { onClick() }
         }
     }
 
@@ -1449,13 +1456,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val colorActivoFondo = COLOR_YAPE_PURPLE
         val colorInactivoFondo = if (esModoOscuro) "#1E293B" else "#FFFFFF"
 
-        btnNavCaja.background = crearBordeRedondo(if (pestaña == 1) colorActivoFondo else colorInactivoFondo, if (pestaña == 1) colorActivoFondo else colorInactivoFondo, 20f)
+        btnNavCaja.background = crearBordeRedondo(if (pestaña == 1) colorActivoFondo else colorInactivoFondo, if (pestaña == 1) colorActivoFondo else colorInactivoFondo, 18f)
         btnNavCaja.setTextColor(if (pestaña == 1) Color.WHITE else Color.parseColor("#64748B"))
 
-        btnNavCajeros.background = crearBordeRedondo(if (pestaña == 2) colorActivoFondo else colorInactivoFondo, if (pestaña == 2) colorActivoFondo else colorInactivoFondo, 20f)
+        btnNavCajeros.background = crearBordeRedondo(if (pestaña == 2) colorActivoFondo else colorInactivoFondo, if (pestaña == 2) colorActivoFondo else colorInactivoFondo, 18f)
         btnNavCajeros.setTextColor(if (pestaña == 2) Color.WHITE else Color.parseColor("#64748B"))
 
-        btnNavConfig.background = crearBordeRedondo(if (pestaña == 3) colorActivoFondo else colorInactivoFondo, if (pestaña == 3) colorActivoFondo else colorInactivoFondo, 20f)
+        btnNavConfig.background = crearBordeRedondo(if (pestaña == 3) colorActivoFondo else colorInactivoFondo, if (pestaña == 3) colorActivoFondo else colorInactivoFondo, 18f)
         btnNavConfig.setTextColor(if (pestaña == 3) Color.WHITE else Color.parseColor("#64748B"))
 
         if (pestaña == 3) actualizarDiagnosticoAjustes()
@@ -1464,19 +1471,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun actualizarDiagnosticoAjustes() {
         val listeners = Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: ""
         val tieneLector = listeners.contains(packageName)
-        txtEstadoLectorDiag.text = "• Lector de Yape / Plin: " + if (tieneLector) "🟢 ACTIVO" else "🔴 DESACTIVADO (Toca)"
-        txtEstadoLectorDiag.setTextColor(Color.parseColor(if (tieneLector) "#15803D" else "#DC2626"))
+        badgeLectorStatus.text = "• Lector Yape/Plin: " + if (tieneLector) "🟢 ACTIVO" else "🔴 DESACTIVADO (Toca)"
+        badgeLectorStatus.setTextColor(Color.parseColor(if (tieneLector) "#15803D" else "#DC2626"))
+        badgeLectorStatus.background = crearBordeRedondo(if (tieneLector) "#ECFDF5" else "#FEF2F2", if (tieneLector) "#A7F3D0" else "#FCA5A5", 12f)
 
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         val tieneBateria = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) pm.isIgnoringBatteryOptimizations(packageName) else true
-        txtEstadoBateriaDiag.text = "• Optimización Segundo Plano: " + if (tieneBateria) "🟢 ACTIVO" else "🔴 DESACTIVADO (Toca)"
-        txtEstadoBateriaDiag.setTextColor(Color.parseColor(if (tieneBateria) "#15803D" else "#DC2626"))
+        badgeBateriaStatus.text = "• Segundo Plano: " + if (tieneBateria) "🟢 ACTIVO" else "🔴 DESACTIVADO (Toca)"
+        badgeBateriaStatus.setTextColor(Color.parseColor(if (tieneBateria) "#15803D" else "#DC2626"))
+        badgeBateriaStatus.background = crearBordeRedondo(if (tieneBateria) "#ECFDF5" else "#FEF2F2", if (tieneBateria) "#A7F3D0" else "#FCA5A5", 12f)
 
         val tieneNotif = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         } else true
-        txtEstadoNotifDiag.text = "• Notificaciones en Pantalla: " + if (tieneNotif) "🟢 ACTIVADO" else "🔴 DESACTIVADO (Toca)"
-        txtEstadoNotifDiag.setTextColor(Color.parseColor(if (tieneNotif) "#15803D" else "#DC2626"))
+        badgeNotifStatus.text = "• Alertas en Pantalla: " + if (tieneNotif) "🟢 ACTIVADO" else "🔴 DESACTIVADO (Toca)"
+        badgeNotifStatus.setTextColor(Color.parseColor(if (tieneNotif) "#15803D" else "#DC2626"))
+        badgeNotifStatus.background = crearBordeRedondo(if (tieneNotif) "#ECFDF5" else "#FEF2F2", if (tieneNotif) "#A7F3D0" else "#FCA5A5", 12f)
     }
 
     private fun actualizarVistaSaldo() {
@@ -1506,7 +1516,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
-
                 val toneG = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
                 toneG.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
                 delay(220)
@@ -1527,8 +1536,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val mensajeArqueo = "📊 ARQUEO DE CAJA:\n\n" +
                 "👤 Cajero: $caj\n" +
                 "⏰ Inicio: $horaInicioTurnoStr  |  Cierre: $horaCierre\n" +
-                "💰 Total Recaudado en este Turno: S/ ${String.format(Locale.US, "%.2f", totalVentasFiltradas)}\n" +
-                "📋 Operaciones de tu Turno: $cantidadVentasFiltradas cobros\n\n" +
+                "💰 Total Recaudado: S/ ${String.format(Locale.US, "%.2f", totalVentasFiltradas)}\n" +
+                "📋 Operaciones: $cantidadVentasFiltradas cobros\n\n" +
                 "¿Deseas enviar tu cierre por WhatsApp y cerrar sesión?"
 
         AlertDialog.Builder(this)
@@ -1714,6 +1723,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                                     }
                                     imgQrPOS.visibility = View.GONE
                                     txtMontoQrPOS.visibility = View.GONE
+                                    montoTecladoPOS = ""
+                                    actualizarDisplayPOS()
                                     Toast.makeText(this@MainActivity, "✅ ¡Cobro confirmado! S/ $monto de $nombre", Toast.LENGTH_LONG).show()
                                 }
                             }
@@ -1761,7 +1772,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
                 withContext(Dispatchers.Main) {
                     actualizarListaCaja(array)
-                    Toast.makeText(this@MainActivity, "Saldo y lista actualizados", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "Actualizado", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {}
         }
@@ -1797,23 +1808,23 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                setPadding(18, 14, 18, 14)
-                background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", "#E2E8F0", 14f)
-                elevation = 4f
+                setPadding(14, 10, 14, 10)
+                background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", "#E2E8F0", 12f)
+                elevation = 2f
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    setMargins(0, 0, 0, 8)
+                    setMargins(0, 0, 0, 6)
                 }
             }
             val txtInfo = TextView(this).apply {
                 text = "${item.optString("nombre")} (${item.optString("hora")})"
-                textSize = 15f
+                textSize = 14f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A"))
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
             val txtM = TextView(this).apply {
                 text = String.format(Locale.US, "+ S/ %.2f", montoLimpio)
-                textSize = 16f
+                textSize = 15f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.parseColor(COLOR_YAPE_PURPLE))
             }
@@ -1840,7 +1851,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         val btnOlvido = Button(this).apply {
             text = "¿Olvidaste tu PIN? Recupéralo por correo"
-            textSize = 14f
+            textSize = 13f
             setTextColor(Color.parseColor("#2563EB"))
             setBackgroundColor(Color.TRANSPARENT)
         }
@@ -1922,7 +1933,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val c = arr.getJSONObject(i)
             layoutListaCajerosAdmin.addView(TextView(this).apply {
                 text = "• ${c.getString("nombre")} (PIN: ${c.getString("pin")})"
-                textSize = 15f
+                textSize = 14f
                 setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#334155"))
                 setPadding(0, 4, 0, 4)
             })
@@ -1960,18 +1971,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onDestroy()
     }
 
+    // FACTORÍA VISUAL FINTECH
     private fun crearTarjetaFintech(context: Context): LinearLayout {
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(35, 35, 35, 35)
-            elevation = 14f
+            setPadding(30, 25, 30, 25)
+            elevation = 10f
             background = GradientDrawable().apply {
                 setColor(Color.parseColor(if (esModoOscuro) "#1E293B" else "#FFFFFF"))
-                cornerRadius = 28f
+                cornerRadius = 24f
                 setStroke(2, Color.parseColor(if (esModoOscuro) "#334155" else "#F1E4F5"))
             }
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 0, 0, 22)
+                setMargins(0, 0, 0, 16)
             }
         }
     }
@@ -1988,14 +2000,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         return Button(context).apply {
             text = texto
             setTextColor(Color.WHITE)
-            textSize = 15f
+            textSize = 14f
             setTypeface(null, Typeface.BOLD)
             isAllCaps = false
-            elevation = 8f
+            elevation = 6f
 
             val baseShape = GradientDrawable().apply {
                 setColor(Color.parseColor(colorHex))
-                cornerRadius = 20f
+                cornerRadius = 16f
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -2004,10 +2016,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 background = baseShape
             }
 
-            setPadding(24, 20, 24, 20)
+            setPadding(20, 16, 20, 16)
             setOnClickListener { accion() }
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 10, 0, 10)
+                setMargins(0, 8, 0, 8)
             }
         }
     }
@@ -2017,15 +2029,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             hint = hintText
             setHintTextColor(Color.parseColor("#94A3B8"))
             setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A"))
-            textSize = 16f
+            textSize = 15f
             background = GradientDrawable().apply {
                 setColor(Color.parseColor(if (esModoOscuro) "#0F172A" else "#F8FAFC"))
-                cornerRadius = 18f
+                cornerRadius = 16f
                 setStroke(2, Color.parseColor(if (esModoOscuro) "#334155" else "#E2E8F0"))
             }
-            setPadding(32, 22, 32, 22)
+            setPadding(26, 18, 26, 18)
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(0, 6, 0, 14)
+                setMargins(0, 4, 0, 10)
             }
         }
     }
