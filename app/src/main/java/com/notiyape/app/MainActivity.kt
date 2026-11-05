@@ -117,9 +117,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var layoutListaCajerosAdmin: LinearLayout
     private lateinit var btnModoOscuroAjustes: Button
 
-    // FILTRO CALENDARIO
+    // FILTRO CALENDARIO (DECLARADOS CORRECTAMENTE)
     private lateinit var cardFiltroFechas: LinearLayout
     private lateinit var txtTituloPeriodo: TextView
+    private lateinit var btnFiltroHoy: Button
+    private lateinit var btnFiltroAyer: Button
+    private lateinit var btnFiltroCalendario: Button
+
     private var esSesionDueño = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -141,7 +145,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         rootLayout = FrameLayout(this).apply {
-            setBackgroundColor(Color.parseColor(if (esModoOscuro) "#0F172A" else "#F8FAFC"))
+            setBackgroundColor(Color.parseColor(if (esModoOscuro) "#0B0F19" else "#F8FAFC"))
         }
 
         bannerSinInternet = TextView(this).apply {
@@ -173,7 +177,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 setMargins(0, 10, 0, 24)
             }
         }
-        val btnDueño = crearBotonPrimario(this, "👑 SOY EL DUEÑO\n(Administrar Negocio)") {
+        val btnDueño = crearBotonPrimario(this, "👑 SOY EL DUEÑO\n(Administrador de Negocio)") {
             if (prefs.getBoolean("tienda_registrada", false)) {
                 pedirPinDueño(prefs) {
                     esSesionDueño = true
@@ -484,11 +488,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val cardPOS = crearTarjetaFintech(this)
         txtMontoDisplayPOS = TextView(this).apply { text = "S/ 0.00"; textSize = 38f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)); gravity = Gravity.CENTER; setPadding(0, 8, 0, 8) }
         val layTeclado = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        fun filaT(b1: String, b2: String, b3: String) = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; weightSum = 3f; setPadding(0, 3, 0, 3)
-            addView(crearBotonTeclado(b1)); addView(crearBotonTeclado(b2)); addView(crearBotonTeclado(b3))
-        }
-        layTeclado.addView(filaT("1", "2", "3")); layTeclado.addView(filaT("4", "5", "6")); layTeclado.addView(filaT("7", "8", "9")); layTeclado.addView(filaT("C", "0", "⌫"))
+        layTeclado.addView(crearFilaTeclado("1", "2", "3"))
+        layTeclado.addView(crearFilaTeclado("4", "5", "6"))
+        layTeclado.addView(crearFilaTeclado("7", "8", "9"))
+        layTeclado.addView(crearFilaTeclado("C", "0", "⌫"))
         imgQrPOS = ImageView(this).apply { layoutParams = LinearLayout.LayoutParams(420, 420).apply { gravity = Gravity.CENTER_HORIZONTAL; setMargins(0, 8, 0, 8) }; visibility = View.GONE }
         txtMontoQrPOS = TextView(this).apply { textSize = 18f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)); gravity = Gravity.CENTER; visibility = View.GONE }
         val btnGenQr = crearBotonPrimario(this, "⚡ MOSTRAR QR DE COBRO") {
@@ -550,7 +553,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardNewCaj.addView(inNCaj); cardNewCaj.addView(inPCaj); cardNewCaj.addView(btnSaveCaj); cardNewCaj.addView(layoutListaCajerosAdmin)
         tabCajeros.addView(cardNewCaj)
 
-        // CONFIGURACIÓN DE QR CON ENLACE DIRECTO AL TUTORIAL DE TU WEB
         val cardQRTab = crearTarjetaFintech(this)
         inQrConfigTabCajeros = crearInputFintech(this, "Pega el texto de tu QR de Yape (000201...)").apply { setText(prefs.getString("qr_base_yape", "")) }
         val btnSaveQR = crearBotonPrimario(this, "Guardar mi QR de Yape 💾") {
@@ -569,13 +571,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
         }
         cardQRTab.addView(TextView(this).apply { text = "📸 Configurar mi Código QR de Yape"; textSize = 16f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
-        cardQRTab.addView(Button(this).apply { 
-            text = "▶️ Ver Tutorial: Cómo obtener mi código QR de Yape"
-            setTextColor(Color.parseColor("#2563EB"))
-            setBackgroundColor(Color.TRANSPARENT)
-            textSize = 13f
-            setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(URL_TUTORIAL_QR))) } 
-        })
+        cardQRTab.addView(Button(this).apply { text = "▶️ Ver Tutorial: Cómo obtener mi código QR de Yape"; setTextColor(Color.parseColor("#2563EB")); setBackgroundColor(Color.TRANSPARENT); textSize = 13f; setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(URL_TUTORIAL_QR))) } })
         cardQRTab.addView(inQrConfigTabCajeros); cardQRTab.addView(btnSaveQR)
         tabCajeros.addView(cardQRTab)
 
@@ -603,11 +599,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com/send?phone=$NUMERO_SOPORTE_WSP&text=" + Uri.encode("Hola Soporte YapeAlDía, negocio $nom ($cod)"))))
         }
         val btnPolitica = Button(this).apply {
-            text = "📄 Política de Privacidad y Seguridad"
-            setTextColor(Color.parseColor("#2563EB"))
-            setBackgroundColor(Color.TRANSPARENT)
-            textSize = 13f
-            setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(URL_POLITICA_PRIVACIDAD))) }
+            text = "📄 Política de Privacidad y Seguridad"; setTextColor(Color.parseColor("#2563EB")); setBackgroundColor(Color.TRANSPARENT); textSize = 13f; setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(URL_POLITICA_PRIVACIDAD))) }
         }
         val btnLogout = Button(this).apply {
             text = "CERRAR SESIÓN"; setTextColor(Color.parseColor("#DC2626")); setBackgroundColor(Color.TRANSPARENT); textSize = 14f; setTypeface(null, Typeface.BOLD)
@@ -664,6 +656,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun crearFilaTeclado(b1: String, b2: String, b3: String): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            weightSum = 3f
+            setPadding(0, 3, 0, 3)
+            addView(crearBotonTeclado(b1))
+            addView(crearBotonTeclado(b2))
+            addView(crearBotonTeclado(b3))
+        }
+    }
+
     private fun crearBotonTeclado(tecla: String): Button {
         return Button(this).apply {
             text = tecla
@@ -674,9 +677,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             layoutParams = LinearLayout.LayoutParams(0, 110, 1f).apply { setMargins(4, 4, 4, 4) }
             setOnClickListener {
                 when (tecla) {
-                    "C" -> montoTecladoPOS = ""
-                    "⌫" -> if (montoTecladoPOS.isNotEmpty()) montoTecladoPOS = montoTecladoPOS.substring(0, montoTecladoPOS.length - 1)
-                    else -> if (montoTecladoPOS.length < 7) montoTecladoPOS += tecla
+                    "C" -> {
+                        montoTecladoPOS = ""
+                    }
+                    "⌫" -> {
+                        if (montoTecladoPOS.isNotEmpty()) {
+                            montoTecladoPOS = montoTecladoPOS.substring(0, montoTecladoPOS.length - 1)
+                        }
+                    }
+                    else -> {
+                        if (montoTecladoPOS.length < 7) {
+                            montoTecladoPOS += tecla
+                        }
+                    }
                 }
                 val mVal = montoTecladoPOS.toDoubleOrNull() ?: 0.0
                 txtMontoDisplayPOS.text = if (montoTecladoPOS.isEmpty()) "S/ 0.00" else String.format(Locale.US, "S/ %.2f", mVal)
@@ -820,11 +833,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun abrirSelectorCalendario() {
         val cal = Calendar.getInstance()
-        DatePickerDialog(this, { _, year, monthOfYear, dayOfMonth ->
+        val listener = DatePickerDialog.OnDateSetListener { _, year, monthOfYear, dayOfMonth ->
             fechaSeleccionadaFiltro = String.format(Locale.US, "%02d/%02d/%04d", dayOfMonth, monthOfYear + 1, year)
             txtTituloPeriodo.text = "📅 Período: $fechaSeleccionadaFiltro"
             consultarCobrosServidorUnaVez()
-        }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
+        }
+        val dpd = DatePickerDialog(
+            this,
+            listener,
+            cal.get(Calendar.YEAR),
+            cal.get(Calendar.MONTH),
+            cal.get(Calendar.DAY_OF_MONTH)
+        )
+        dpd.show()
     }
 
     private fun mostrarDialogoAjustesRestringidos() {
