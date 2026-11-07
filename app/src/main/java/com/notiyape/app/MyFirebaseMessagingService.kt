@@ -23,14 +23,14 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
 
-        val titulo = remoteMessage.notification?.title ?: remoteMessage.data["titulo"] ?: "🔔 NotiCobros"
+        val titulo = remoteMessage.notification?.title ?: remoteMessage.data["titulo"] ?: "🔔 YapeAlDía"
         val mensaje = remoteMessage.notification?.body ?: remoteMessage.data["mensaje"] ?: "¡Nuevo cobro recibido!"
 
         mostrarNotificacionPush(titulo, mensaje)
     }
 
     private fun mostrarNotificacionPush(titulo: String, mensaje: String) {
-        val channelId = "noticobros_alertas_channel"
+        val channelId = "yapealdia_alertas_channel"
         val intent = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
@@ -45,7 +45,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
-                "Alertas de Cobro NotiCobros",
+                "Alertas de Cobro YapeAlDía",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Notificaciones instantáneas de pagos"

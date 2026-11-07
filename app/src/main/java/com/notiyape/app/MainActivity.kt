@@ -119,9 +119,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var txtBannerCodigoCajeros: TextView
     private lateinit var inCorreoRegistro: EditText
     private lateinit var inCorreoLoginDueño: EditText
-    private lateinit var inQrConfigTabCajeros: EditText
     private lateinit var layoutListaCajerosAdmin: LinearLayout
     private lateinit var btnModoOscuroAjustes: Button
+
+    // QR DE YAPE
+    private var qrTemporalDetectado: String = ""
+    private lateinit var layoutContenedorQR: LinearLayout
+    private lateinit var layoutAccionAdjuntarQr: LinearLayout
+    private lateinit var layoutEstadoQrGuardado: LinearLayout
+    private lateinit var txtEstadoQrGuardado: TextView
+    private lateinit var txtPreviaQrDetectado: TextView
+    private lateinit var btnGuardarQrDeYape: Button
 
     // FILTRO CALENDARIO (DECLARADOS CORRECTAMENTE)
     private lateinit var cardFiltroFechas: LinearLayout
@@ -560,28 +568,54 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         tabCajeros.addView(cardNewCaj)
 
         val cardQRTab = crearTarjetaFintech(this)
-        inQrConfigTabCajeros = crearInputFintech(this, "Pega el texto de tu QR de Yape (000201...)").apply { setText(prefs.getString("qr_base_yape", "")) }
-        val btnAdjuntarImgQR = crearBotonSecundario(this, "📷 Adjuntar Imagen de mi QR (Galería)") { abrirGaleriaParaQR() }
-        cardQRTab.addView(btnAdjuntarImgQR)
-        val btnSaveQR = crearBotonPrimario(this, "Guardar mi QR de Yape 💾") {
-            val qRaw = inQrConfigTabCajeros.text.toString().trim()
-            val cod = prefs.getString("codigo_tienda", "") ?: ""
-            if (qRaw.isNotEmpty()) {
-                prefs.edit().putString("qr_base_yape", qRaw).apply()
-                CoroutineScope(Dispatchers.IO).launch {
-                    try {
-                        val json = JSONObject().apply { put("accion", "guardar_qr"); put("codigoTienda", cod); put("qrBase", qRaw) }
-                        val b = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-                        client.newCall(Request.Builder().url(SERVIDOR_URL).post(b).build()).execute().close()
-                    } catch (e: Exception) {}
-                }
-                Toast.makeText(this, "✅ QR guardado en la nube", Toast.LENGTH_SHORT).show()
-            }
-        }
         cardQRTab.addView(TextView(this).apply { text = "📸 Configurar mi Código QR de Yape"; textSize = 16f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
         cardQRTab.addView(Button(this).apply { text = "▶️ Ver Tutorial: Cómo obtener mi código QR de Yape"; setTextColor(Color.parseColor("#2563EB")); setBackgroundColor(Color.TRANSPARENT); textSize = 13f; setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(URL_TUTORIAL_QR))) } })
-        cardQRTab.addView(inQrConfigTabCajeros); cardQRTab.addView(btnSaveQR)
+
+        layoutContenedorQR = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
+        layoutAccionAdjuntarQr = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val btnAdjuntarImgQR = crearBotonSecundario(this, "📷 Adjuntar Imagen de mi QR de Yape (Galería)") { abrirGaleriaParaQR() }
+        txtPreviaQrDetectado = TextView(this).apply {
+            text = "Toca el botón arriba para seleccionar la foto o captura de tu QR de Yape."
+            textSize = 12f
+            setTextColor(Color.parseColor("#64748B"))
+            setPadding(0, 10, 0, 10)
+            gravity = Gravity.CENTER
+        }
+        btnGuardarQrDeYape = crearBotonPrimario(this, "Guardar mi QR de Yape 💾") {
+            guardarQrSeleccionado()
+        }.apply { visibility = View.GONE }
+
+        layoutAccionAdjuntarQr.addView(btnAdjuntarImgQR)
+        layoutAccionAdjuntarQr.addView(txtPreviaQrDetectado)
+        layoutAccionAdjuntarQr.addView(btnGuardarQrDeYape)
+
+        layoutEstadoQrGuardado = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        txtEstadoQrGuardado = TextView(this).apply {
+            textSize = 14f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#15803D"))
+            background = crearBordeRedondo(if (esModoOscuro) "#064E3B" else "#ECFDF5", "#10B981", 16f)
+            setPadding(24, 20, 24, 20)
+            gravity = Gravity.CENTER
+        }
+        val btnCambiarQR = crearBotonSecundario(this, "🔄 Cambiar o Actualizar Foto de mi QR") {
+            qrTemporalDetectado = ""
+            txtPreviaQrDetectado.text = "Selecciona una nueva imagen de tu QR de Yape:"
+            txtPreviaQrDetectado.setTextColor(Color.parseColor("#64748B"))
+            btnGuardarQrDeYape.visibility = View.GONE
+            layoutAccionAdjuntarQr.visibility = View.VISIBLE
+            layoutEstadoQrGuardado.visibility = View.GONE
+        }
+        layoutEstadoQrGuardado.addView(txtEstadoQrGuardado)
+        layoutEstadoQrGuardado.addView(btnCambiarQR)
+
+        layoutContenedorQR.addView(layoutAccionAdjuntarQr)
+        layoutContenedorQR.addView(layoutEstadoQrGuardado)
+        cardQRTab.addView(layoutContenedorQR)
         tabCajeros.addView(cardQRTab)
+
+        renderizarVistaQR()
 
         // TAB 3: AJUSTES
         tabConfiguracion = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
@@ -746,6 +780,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         seleccionarPestaña(1)
         iniciarSincronizador()
         recargarListaCajeros(prefs)
+        renderizarVistaQR()
+        verificarYMostrarOptimizaciones(alEntrar = true)
     }
 
     private fun seleccionarPestaña(p: Int) {
@@ -858,8 +894,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun mostrarDivulgacionProminenteNotificaciones() {
         AlertDialog.Builder(this)
-            .setTitle("Divulgación de Privacidad y Notificaciones 🔔")
-            .setMessage("NotiCobros requiere acceso a las notificaciones para detectar cobros de Yape y Plin.\n\n• NO lee mensajes privados ni WhatsApp.\n• NO accede a claves ni saldos bancarios.\n• Solo anuncia el cobro por altavoz.\n• Ningún dato se comercializa.")
+            .setTitle("Divulgación de Privacidad y Notificaciones - YapeAlDía 🔔")
+            .setMessage("YapeAlDía requiere acceso a las notificaciones para detectar y cantar los cobros de Yape y Plin automáticamente.\n\n• NO lee mensajes privados ni WhatsApp.\n• NO accede a contraseñas ni saldos bancarios.\n• Solo anuncia el cobro por altavoz y actualiza tu caja.\n• Ningún dato personal se comercializa.")
             .setPositiveButton("Aceptar y Configurar") { _, _ ->
                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
@@ -885,9 +921,85 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
                 }
             } else {
-                Toast.makeText(this, "✅ YapeAlDía ya está optimizada.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "✅ YapeAlDía ya está optimizada para segundo plano 24/7.", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    private fun verificarYMostrarOptimizaciones(alEntrar: Boolean = true) {
+        val tLector = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")?.contains(packageName) == true
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val tBat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) pm.isIgnoringBatteryOptimizations(packageName) else true
+        val tNot = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED else true
+
+        if (tLector && tBat && tNot) {
+            if (!alEntrar) {
+                Toast.makeText(this, "✅ YapeAlDía está 100% optimizado para operar 24/7", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+
+        val lay = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(40, 30, 40, 20)
+        }
+
+        val txtTit = TextView(this).apply {
+            text = "⚡ Optimización de Cobros 24/7"
+            textSize = 18f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor(COLOR_PRIMARY))
+        }
+        val txtDesc = TextView(this).apply {
+            text = "Para que YapeAlDía cante y registre tus cobros de Yape y Plin sin cerrarse en segundo plano, activa estos 3 permisos en tu celular:"
+            textSize = 13f
+            setTextColor(Color.parseColor(if (esModoOscuro) "#CBD5E1" else "#475569"))
+            setPadding(0, 10, 0, 15)
+        }
+        lay.addView(txtTit)
+        lay.addView(txtDesc)
+
+        val btnLector = Button(this).apply {
+            text = if (tLector) "✅ 1. Lector Yape y Plin (Activado)" else "🔔 1. Activar Lector Yape y Plin"
+            textSize = 13f
+            setBackgroundColor(Color.parseColor(if (tLector) "#10B981" else "#742284"))
+            setTextColor(Color.WHITE)
+            setOnClickListener {
+                mostrarDivulgacionProminenteNotificaciones()
+            }
+        }
+        lay.addView(btnLector)
+
+        val btnNotif = Button(this).apply {
+            text = if (tNot) "✅ 2. Alertas en Pantalla (Permitido)" else "📢 2. Permitir Notificaciones"
+            textSize = 13f
+            setBackgroundColor(Color.parseColor(if (tNot) "#10B981" else "#0284C7"))
+            setTextColor(Color.WHITE)
+            setOnClickListener {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+                } else {
+                    Toast.makeText(this@MainActivity, "✅ Permitido en esta versión de Android", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        lay.addView(btnNotif)
+
+        val btnBateria = Button(this).apply {
+            text = if (tBat) "✅ 3. Segundo Plano 24/7 (Optimizado)" else "🔋 3. Optimizar Batería (Sin Restricciones)"
+            textSize = 13f
+            setBackgroundColor(Color.parseColor(if (tBat) "#10B981" else "#D97706"))
+            setTextColor(Color.WHITE)
+            setOnClickListener {
+                solicitarSinRestriccionesBateria()
+            }
+        }
+        lay.addView(btnBateria)
+
+        AlertDialog.Builder(this)
+            .setView(lay)
+            .setPositiveButton("Continuar a mi Caja 🚀") { d, _ -> d.dismiss() }
+            .show()
     }
 
     private fun dialogCambiarPin(prefs: android.content.SharedPreferences) {
@@ -907,7 +1019,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }.setNegativeButton("Cancelar", null).show()
     }
 
-        private fun abrirGaleriaParaQR() {
+    private fun abrirGaleriaParaQR() {
         val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
             type = "image/*"
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -935,36 +1047,68 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val result = reader.decode(binaryBitmap)
                 val textoQr = result.text
 
-                val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
-                var cod = prefs.getString("codigo_tienda", "") ?: ""
-                if (cod.isEmpty()) {
-                    cod = "TIENDA-" + (1000..9999).random()
-                    prefs.edit().putString("codigo_tienda", cod).apply()
-                }
-
-                prefs.edit().putString("qr_base_yape", textoQr).apply()
-
-                val json = JSONObject().apply {
-                    put("accion", "guardar_qr")
-                    put("codigoTienda", cod)
-                    put("qrBase", textoQr)
-                }
-                val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-                client.newCall(Request.Builder().url(SERVIDOR_URL).post(body).build()).execute().close()
-
                 runOnUiThread {
-                    inQrConfigTabCajeros.setText(textoQr)
-                    AlertDialog.Builder(this@MainActivity)
-                        .setTitle("¡QR de Yape Vinculado! 🎉")
-                        .setMessage("Código QR decodificado exitosamente.\n\nID de Tienda: $cod\n\nAhora tu QR está listo para cobrar en la caja con el monto dinámico.")
-                        .setPositiveButton("Genial", null)
-                        .show()
+                    qrTemporalDetectado = textoQr
+                    txtPreviaQrDetectado.text = "✅ QR de Yape reconocido con éxito.\nAhora toca 'Guardar mi QR de Yape 💾' para vincularlo a tu caja."
+                    txtPreviaQrDetectado.setTextColor(Color.parseColor("#15803D"))
+                    btnGuardarQrDeYape.visibility = View.VISIBLE
+                    Toast.makeText(this@MainActivity, "¡QR de Yape detectado! Toca 'Guardar mi QR de Yape 💾'", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     Toast.makeText(this@MainActivity, "No se encontró un código QR válido en la imagen. Intenta con una captura más nítida.", Toast.LENGTH_LONG).show()
                 }
             }
+        }
+    }
+
+    private fun guardarQrSeleccionado() {
+        if (qrTemporalDetectado.isEmpty()) {
+            Toast.makeText(this, "Primero selecciona una foto de tu QR", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        var cod = prefs.getString("codigo_tienda", "") ?: ""
+        if (cod.isEmpty()) {
+            cod = "TIENDA-YAPE-" + (1000..9999).random()
+            prefs.edit().putString("codigo_tienda", cod).apply()
+        }
+        prefs.edit().putString("qr_base_yape", qrTemporalDetectado).apply()
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val json = JSONObject().apply {
+                    put("accion", "guardar_qr")
+                    put("codigoTienda", cod)
+                    put("qrBase", qrTemporalDetectado)
+                }
+                val b = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                client.newCall(Request.Builder().url(SERVIDOR_URL).post(b).build()).execute().close()
+            } catch (e: Exception) {}
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("¡Se creó el ID de su QR correctamente! 🎉")
+            .setMessage("Su código QR de Yape ha quedado vinculado con éxito a su negocio.\n\nID de su QR: $cod\n\nSu caja en YapeAlDía ya está lista para generar cobros dinámicos con monto exacto.")
+            .setPositiveButton("Continuar a Cobrar 🛒") { _, _ -> }
+            .show()
+
+        renderizarVistaQR()
+    }
+
+    private fun renderizarVistaQR() {
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        val qrGuardado = prefs.getString("qr_base_yape", "") ?: ""
+        val codTienda = prefs.getString("codigo_tienda", "") ?: ""
+
+        if (qrGuardado.isNotEmpty()) {
+            layoutAccionAdjuntarQr.visibility = View.GONE
+            layoutEstadoQrGuardado.visibility = View.VISIBLE
+            txtEstadoQrGuardado.text = "✅ QR DE YAPE VINCULADO Y ACTIVO\n\n🔑 ID DE SU QR: $codTienda\n\nTu caja ya genera cobros automáticos con monto exacto."
+        } else {
+            layoutAccionAdjuntarQr.visibility = View.VISIBLE
+            layoutEstadoQrGuardado.visibility = View.GONE
+            btnGuardarQrDeYape.visibility = if (qrTemporalDetectado.isNotEmpty()) View.VISIBLE else View.GONE
         }
     }
 
@@ -975,6 +1119,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             if (!acc.isNullOrEmpty()) {
                 if (req == REQ_GOOGLE_PICKER_REGISTRO) inCorreoRegistro.setText(acc)
                 else if (req == REQ_GOOGLE_PICKER_LOGIN) inCorreoLoginDueño.setText(acc)
+            }
+            if (req == REQ_SELECCIONAR_IMAGEN_QR) {
+                data.data?.let { uri -> procesarImagenQrSeleccionada(uri) }
             }
         }
     }
