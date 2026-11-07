@@ -59,6 +59,14 @@ class MyFirebaseMessagingService : FirebaseMessagingService(), TextToSpeech.OnIn
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
 
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        val ultimoCobroLocalMs = prefs.getLong("ultimo_cobro_local_ms", 0L)
+        if (System.currentTimeMillis() - ultimoCobroLocalMs < 30_000L) {
+            // Este mismo celular acaba de detectar y cantar el cobro directamente desde el lector de notificaciones.
+            // Se ignora el eco push para no duplicar notificación ni voz cuando se usa Dueño y Cajero en el mismo teléfono.
+            return
+        }
+
         // Despertar CPU del celular del Cajero aunque esté con pantalla apagada o minimizado
         try {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -72,7 +80,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService(), TextToSpeech.OnIn
 
         mostrarNotificacionPush(titulo, mensaje)
 
-        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
         if (prefs.getBoolean("voz_activa", true)) {
             val fraseHablar = if (monto.isNotEmpty()) {
                 val mTexto = if (monto == "1" || monto == "1.00") "un sol" else "$monto soles"

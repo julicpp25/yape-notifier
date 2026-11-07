@@ -319,9 +319,29 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         }
     }
 
+    companion object {
+        @Volatile
+        private var ultimaHuellaMemoria: String = ""
+        @Volatile
+        private var ultimoTsMemoria: Long = 0L
+        private val lockDedup = Any()
+    }
+
     private fun procesarPago(texto: String, metodo: String) {
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
         val codigoTienda = prefs.getString("codigo_tienda", "") ?: return
+
+        // =========================================================================
+        // ESCUDO 0: BLOQUEO DE YAPE PERSONAL DEL CAJERO
+        // Solo el celular del Dueño (Receptor Oficial) debe leer notificaciones de Yape/Plin.
+        // Si este celular está en modo Cajero, se ignoran todas las notificaciones locales
+        // para que los Yapes personales del empleado JAMÁS se registren en la tienda.
+        // =========================================================================
+        val esCelularDuenoReceptor = prefs.getBoolean("es_celular_dueño_receptor", false)
+        val esModoCajero = prefs.getBoolean("cajero_logueado", false)
+        if (!esCelularDuenoReceptor || esModoCajero) {
+            return
+        }
 
         // =========================================================================
         // ESCUDO 1: DESCARTAR PUBLICIDAD, CRÉDITOS Y PRÉSTAMOS
@@ -349,7 +369,8 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         val regexMonto = Regex("""S/\.?\s*([\d]+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
         val matchMonto = regexMonto.find(texto) ?: return
         val monto = matchMonto.groups[1]?.value?.replace(",", ".") ?: return
-        if ((monto.toDoubleOrNull() ?: 0.0) <= 0.0) return
+        val montoDouble = monto.toDoubleOrNull() ?: 0.0
+        if (montoDouble <= 0.0) return
 
         // =========================================================================
         // 4. EXTRAER REMITENTE LIMPIO (Soporta nombres antes o después del verbo)
@@ -376,16 +397,57 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             }
         }
 
+        // =========================================================================
+        // ESCUDO 5: ANTI-DUPLICADOS DE 45 SEGUNDOS (MEMORIA + PREFS)
+        // Evita que un mismo Yape se registre o cante 2 veces cuando Android lanza
+        // doble evento onNotificationPosted o cuando se prueba Dueño + Cajero en 1 celular.
+        // =========================================================================
+        val nowMs = System.currentTimeMillis()
+        val huellaActual = "${remitente.lowercase(Locale.ROOT)}|${String.format(Locale.US, "%.2f", montoDouble)}|$metodo"
+        synchronized(lockDedup) {
+            val ultimaPref = prefs.getString("ultima_huella_cobro", "") ?: ""
+            val ultimoTsPref = prefs.getLong("ultimo_ts_cobro", 0L)
+            if ((huellaActual == ultimaHuellaMemoria && (nowMs - ultimoTsMemoria) < 45_000L) ||
+                (huellaActual == ultimaPref && (nowMs - ultimoTsPref) < 45_000L)
+            ) {
+                return // Duplicado detectado dentro de los 45 segundos: se ignora por completo
+            }
+            ultimaHuellaMemoria = huellaActual
+            ultimoTsMemoria = nowMs
+            prefs.edit()
+                .putString("ultima_huella_cobro", huellaActual)
+                .putLong("ultimo_ts_cobro", nowMs)
+                .putLong("ultimo_cobro_local_ms", nowMs)
+                .putString("ultimo_monto_local", monto)
+                .apply()
+        }
+
         // Despertar procesador durante 6.5 segundos aunque la pantalla esté apagada o bloqueada
         adquirirWakeLockTemporal(6500L)
 
-        // Anuncio en voz alta con timbre previo y frase aleatoria
+        // =========================================================================
+        // VERIFICADOR DE MONTO ESPERADO EN CAJA (ALERTA DE PAGO INCOMPLETO)
+        // =========================================================================
+        val montoEsperadoStr = prefs.getString("monto_esperado_pos", "") ?: ""
+        val montoEsperado = montoEsperadoStr.toDoubleOrNull() ?: 0.0
+        val cajeroOrdenEsperada = prefs.getString("cajero_orden_pos", "") ?: ""
+
+        // Anuncio en voz alta con timbre previo y verificación de monto completo
         if (prefs.getBoolean("voz_activa", true)) {
-            reproducirTimbreYVoz(metodo, monto)
+            reproducirTimbreYVoz(metodo, monto, montoDouble, montoEsperado)
         }
 
-        val cajeroActual = prefs.getString("cajero_activo", "Caja") ?: "Caja"
-        val nowMs = System.currentTimeMillis()
+        // Si se cubrió el monto esperado en el POS, limpiamos la orden pendiente
+        if (montoEsperado > 0.0 && montoDouble >= (montoEsperado - 0.01)) {
+            prefs.edit().remove("monto_esperado_pos").remove("cajero_orden_pos").apply()
+        }
+
+        val cajeroActual = when {
+            cajeroOrdenEsperada.isNotEmpty() -> cajeroOrdenEsperada
+            prefs.getBoolean("cajero_logueado", false) -> prefs.getString("cajero_activo", "Caja") ?: "Caja"
+            else -> prefs.getString("cajero_activo", "Dueño") ?: "Dueño"
+        }
+
         val horaActual = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(nowMs))
         val fechaHoy = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(nowMs))
 
@@ -460,7 +522,12 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         }
     }
 
-    private fun reproducirTimbreYVoz(metodo: String, monto: String) {
+    private fun reproducirTimbreYVoz(
+        metodo: String,
+        monto: String,
+        montoRecibido: Double = 0.0,
+        montoEsperado: Double = 0.0
+    ) {
         CoroutineScope(Dispatchers.Default).launch {
             try {
                 val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -474,9 +541,14 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
 
             if (vozLista && motorVoz != null) {
                 val fraseMonto = if (monto == "1" || monto == "1.00") "un sol" else "$monto soles"
-                // Selección aleatoria de frases motivadoras
-                val animo = frasesMotivadoras.random()
-                val discurso = "¡Te llegó un $metodo de $fraseMonto! $animo"
+                val discurso = if (montoEsperado > 0.0 && montoRecibido > 0.0 && montoRecibido < (montoEsperado - 0.01)) {
+                    val faltante = String.format(Locale.US, "%.2f", montoEsperado - montoRecibido).removeSuffix(".00")
+                    val esperadoTxt = String.format(Locale.US, "%.2f", montoEsperado).removeSuffix(".00")
+                    "¡Atención caja! Se recibió un $metodo de $fraseMonto, pero el cobro en pantalla era de $esperadoTxt soles. ¡Faltan $faltante soles!"
+                } else {
+                    val animo = frasesMotivadoras.random()
+                    "¡Te llegó un $metodo de $fraseMonto! $animo"
+                }
                 val params = Bundle().apply {
                     putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
                 }

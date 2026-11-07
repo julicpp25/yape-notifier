@@ -196,6 +196,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             if (prefs.getBoolean("tienda_registrada", false)) {
                 pedirPinDueño(prefs) {
                     esSesionDueño = true
+                    prefs.edit()
+                        .putBoolean("es_celular_dueño_receptor", true)
+                        .putBoolean("cajero_logueado", false)
+                        .apply()
                     verificarAsistentePermisosOEntrar()
                 }
             } else {
@@ -254,7 +258,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         prefs.edit().putString("nombre_tienda", nom).putString("correo_tienda", cor)
                             .putString("codigo_tienda", cod).putString("pin_dueño", p1)
                             .putString("sheet_url_cliente", resJson.optString("sheetUrl", ""))
-                            .putBoolean("tienda_registrada", true).apply()
+                            .putBoolean("tienda_registrada", true)
+                            .putBoolean("es_celular_dueño_receptor", true)
+                            .putBoolean("cajero_logueado", false)
+                            .apply()
                         runOnUiThread {
                             esSesionDueño = true
                             mostrarSeccion(layoutBienvenida)
@@ -318,7 +325,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             .putString("sheet_url_cliente", resJson.optString("sheetUrl", ""))
                             .putString("qr_base_yape", resJson.optString("qrBase", ""))
                             .putString("lista_cajeros", resJson.optString("cajeros", "[]"))
-                            .putBoolean("tienda_registrada", true).apply()
+                            .putBoolean("tienda_registrada", true)
+                            .putBoolean("es_celular_dueño_receptor", true)
+                            .putBoolean("cajero_logueado", false)
+                            .apply()
                         runOnUiThread {
                             esSesionDueño = true
                             verificarAsistentePermisosOEntrar()
@@ -352,44 +362,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val cod = inCodC.text.toString().trim()
             val caj = inNomC.text.toString().trim()
             val pin = inPinC.text.toString().trim()
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    val json = JSONObject().apply {
-                        put("accion", "login_cajero")
-                        put("codigoTienda", cod)
-                        put("nombreCajero", caj)
-                        put("pinCajero", pin)
-                    }
-                    val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-                    val req = Request.Builder().url(SERVIDOR_URL).post(body).build()
-                    val res = client.newCall(req).execute()
-                    val resJson = JSONObject(res.body?.string() ?: "")
-                    res.close()
-                    if (resJson.optString("status") == "exito") {
-                        val topic = "tienda_" + cod.replace(Regex("[^a-zA-Z0-9-_.~%]"), "_")
-                        FirebaseMessaging.getInstance().subscribeToTopic(topic)
-                        val nowMs = System.currentTimeMillis()
-                        val hora = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(nowMs))
-                        val fecha = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(nowMs))
-                        prefs.edit().putString("codigo_tienda", cod).putString("nombre_tienda", resJson.optString("nombreNegocio", cod))
-                            .putString("cajero_activo", caj).putString("qr_base_yape", resJson.optString("qrBase", ""))
-                            .putLong("cajero_inicio_turno_ms", nowMs).putString("cajero_hora_inicio", hora)
-                            .putString("cajero_fecha_inicio", fecha).putBoolean("cajero_logueado", true).apply()
-                        runOnUiThread {
-                            timestampInicioTurnoCajero = nowMs
-                            horaInicioTurnoStr = hora
-                            fechaInicioTurnoStr = fecha
-                            esSesionDueño = false
-                            verificarAsistentePermisosOEntrar()
-                        }
-                    } else {
-                        runOnUiThread { Toast.makeText(this@MainActivity, resJson.optString("mensaje"), Toast.LENGTH_SHORT).show() }
-                    }
-                } catch (e: Exception) {}
+            if (cod.isEmpty() || caj.isEmpty() || pin.isEmpty()) {
+                Toast.makeText(this, "Completa el código de tienda, tu nombre y PIN", Toast.LENGTH_SHORT).show()
+                return@crearBotonPrimario
             }
+            ejecutarLoginCajeroConControlDeSesion(prefs, cod, caj, pin, forzarTraslado = false)
+        }
+        val txtAvisoPrivacidadCajero = TextView(this).apply {
+            text = "🔒 Privacidad para el Cajero: YapeAlDía NO lee el Yape personal de tu celular. Tu equipo solo recibe las alertas de cobros de la tienda."
+            textSize = 12f
+            setTextColor(Color.parseColor("#475569"))
+            setPadding(4, 12, 4, 4)
         }
         cardLogC.addView(TextView(this).apply { text = "Acceso para Cajeros 🛒"; textSize = 22f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
-        cardLogC.addView(inCodC); cardLogC.addView(inNomC); cardLogC.addView(inPinC); cardLogC.addView(btnEntrarCaja)
+        cardLogC.addView(inCodC); cardLogC.addView(inNomC); cardLogC.addView(inPinC); cardLogC.addView(btnEntrarCaja); cardLogC.addView(txtAvisoPrivacidadCajero)
         layoutLoginCajero.addView(cardLogC)
 
         // 5. BIENVENIDA & ASISTENTE
@@ -447,26 +433,27 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         txtInfoCajero = TextView(this).apply { textSize = 14f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A")); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) }
         switchVozCaja = Switch(this).apply { text = "🔊 "; isChecked = prefs.getBoolean("voz_activa", true); setOnCheckedChangeListener { _, isChecked -> prefs.edit().putBoolean("voz_activa", isChecked).apply() } }
         val btnKeepScreen = Button(this).apply {
-            text = "💡 Pantalla Activa"
-            textSize = 10f
+            text = "💡 OFF"
+            textSize = 11f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#0F172A"))
             background = crearBordeRedondo("#FEF08A", "#FACC15", 12f)
-            setPadding(12, 8, 12, 8)
+            setPadding(14, 8, 14, 8)
             var encendida = false
             setOnClickListener {
                 encendida = !encendida
                 if (encendida) {
                     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    text = "💡 Pantalla Fija: ON"
+                    text = "💡 ON"
                     background = crearBordeRedondo("#10B981", "#059669", 12f)
                     setTextColor(Color.WHITE)
-                    Toast.makeText(this@MainActivity, "💡 Modo Mostrador Activo: La pantalla no se apagará", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "💡 Pantalla activa: no se apagará", Toast.LENGTH_SHORT).show()
                 } else {
                     window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    text = "💡 Pantalla Activa"
+                    text = "💡 OFF"
                     background = crearBordeRedondo("#FEF08A", "#FACC15", 12f)
                     setTextColor(Color.parseColor("#0F172A"))
+                    Toast.makeText(this@MainActivity, "💡 Pantalla fija desactivada", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -556,13 +543,23 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         txtMontoQrPOS = TextView(this).apply { textSize = 18f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)); gravity = Gravity.CENTER; visibility = View.GONE }
         val btnGenQr = crearBotonPrimario(this, "⚡ MOSTRAR QR DE COBRO") {
             val mVal = montoTecladoPOS.toDoubleOrNull() ?: 0.0
-            if (mVal <= 0.0) { Toast.makeText(this, "Ingresa un monto", Toast.LENGTH_SHORT).show(); return@crearBotonPrimario }
+            if (mVal <= 0.0) { Toast.makeText(this, "Ingresa un monto mayor a S/ 0.00", Toast.LENGTH_SHORT).show(); return@crearBotonPrimario }
             val qBase = prefs.getString("qr_base_yape", "") ?: ""
-            if (qBase.isEmpty()) { Toast.makeText(this, "Configura tu QR en Cajeros", Toast.LENGTH_LONG).show(); return@crearBotonPrimario }
-            val bmp = generarBitmapQr(qBase, 420, 420)
+            if (qBase.isEmpty()) { Toast.makeText(this, "Configura tu QR en la pestaña Cajeros", Toast.LENGTH_LONG).show(); return@crearBotonPrimario }
+
+            val montoFormateado = String.format(Locale.US, "%.2f", mVal)
+            val cajeroResp = if (esSesionDueño) "Dueño" else (prefs.getString("cajero_activo", "Cajero") ?: "Cajero")
+            prefs.edit()
+                .putString("monto_esperado_pos", montoFormateado)
+                .putString("cajero_orden_pos", cajeroResp)
+                .apply()
+
+            val qrDinamicoEMV = inyectarMontoEMVCoConCRC16(qBase, mVal)
+            val bmp = generarBitmapQr(qrDinamicoEMV, 420, 420)
             if (bmp != null) {
                 imgQrPOS.setImageBitmap(bmp); imgQrPOS.visibility = View.VISIBLE
-                txtMontoQrPOS.text = "Escanea y paga: S/ " + String.format(Locale.US, "%.2f", mVal)
+                txtMontoQrPOS.text = "📲 Escanea y paga: S/ $montoFormateado\n🔊 Verificador activo: avisará por voz si pagan menos"
+                txtMontoQrPOS.textSize = 15f
                 txtMontoQrPOS.visibility = View.VISIBLE
             }
         }
@@ -574,7 +571,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardHist.addView(TextView(this).apply { text = "📋 Cobros en Vivo:"; textSize = 15f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A")) })
         cardHist.addView(layoutListaCobrosCaja)
         cardHist.addView(crearBotonSecundario(this, "📲 Enviar Cuadre por WhatsApp") { enviarCuadrePorWhatsApp() })
-        cardHist.addView(crearBotonSecundario(this, "📥 Exportar Historial CSV Contable") { exportarHistorialCSV() })
+        cardHist.addView(crearBotonSecundario(this, "📊 Descargar mi Excel (Google Sheets)") { descargarOesAbrirGoogleSheet() })
 
         tabCajaPOS.addView(barraSubCaja); tabCajaPOS.addView(cardFiltroFechas); tabCajaPOS.addView(cardTotal); tabCajaPOS.addView(cardPOS); tabCajaPOS.addView(cardHist)
 
@@ -768,6 +765,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 when (tecla) {
                     "C" -> {
                         montoTecladoPOS = ""
+                        getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+                            .edit().remove("monto_esperado_pos").remove("cajero_orden_pos").apply()
+                        imgQrPOS.visibility = View.GONE
+                        txtMontoQrPOS.visibility = View.GONE
                     }
                     "⌫" -> {
                         if (montoTecladoPOS.isNotEmpty()) {
@@ -809,8 +810,89 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun verificarAsistentePermisosOEntrar() {
-        if (getSharedPreferences("YapePrefs", Context.MODE_PRIVATE).getBoolean("asistente_permisos_listo", false)) entrarDirectoAlSistema()
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        if (!esSesionDueño) {
+            // Al Cajero NUNCA se le pide permiso de leer notificaciones de su celular (para no leer su Yape personal)
+            entrarDirectoAlSistema()
+            return
+        }
+        if (prefs.getBoolean("asistente_permisos_listo", false)) entrarDirectoAlSistema()
         else mostrarSeccion(layoutPermiso1Lector)
+    }
+
+    private fun ejecutarLoginCajeroConControlDeSesion(
+        prefs: android.content.SharedPreferences,
+        cod: String,
+        caj: String,
+        pin: String,
+        forzarTraslado: Boolean
+    ) {
+        val nuevoTokenSesion = "SES-" + Build.MODEL.replace(" ", "").take(6).uppercase(Locale.ROOT) + "-" + (10000..99999).random()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val json = JSONObject().apply {
+                    put("accion", "login_cajero")
+                    put("codigoTienda", cod)
+                    put("nombreCajero", caj)
+                    put("pinCajero", pin)
+                    put("sesionToken", nuevoTokenSesion)
+                    put("modeloCelular", Build.MODEL)
+                    put("forzarSesion", forzarTraslado)
+                }
+                val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                val req = Request.Builder().url(SERVIDOR_URL).post(body).build()
+                val res = client.newCall(req).execute()
+                val resJson = JSONObject(res.body?.string() ?: "")
+                res.close()
+
+                val status = resJson.optString("status")
+                if (status == "sesion_activa_otro_celular" && !forzarTraslado) {
+                    val equipoAnterior = resJson.optString("equipoActivo", "otro celular")
+                    runOnUiThread {
+                        AlertDialog.Builder(this@MainActivity)
+                            .setTitle("⚠️ Cajero ya abierto en otro celular")
+                            .setMessage("El cajero '$caj' ya tiene un turno abierto en $equipoAnterior.\n\nPor seguridad no se permite usar el mismo cajero en 2 celulares al mismo tiempo.\n\n¿Deseas trasladar el turno a este celular y cerrar automáticamente el anterior?")
+                            .setPositiveButton("Sí, abrir aquí y cerrar el otro") { _, _ ->
+                                ejecutarLoginCajeroConControlDeSesion(prefs, cod, caj, pin, forzarTraslado = true)
+                            }
+                            .setNegativeButton("Cancelar", null)
+                            .show()
+                    }
+                    return@launch
+                }
+
+                if (status == "exito") {
+                    val topic = "tienda_" + cod.replace(Regex("[^a-zA-Z0-9-_.~%]"), "_")
+                    FirebaseMessaging.getInstance().subscribeToTopic(topic)
+                    val nowMs = System.currentTimeMillis()
+                    val hora = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(nowMs))
+                    val fecha = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(nowMs))
+                    prefs.edit()
+                        .putString("codigo_tienda", cod)
+                        .putString("nombre_tienda", resJson.optString("nombreNegocio", cod))
+                        .putString("cajero_activo", caj)
+                        .putString("qr_base_yape", resJson.optString("qrBase", ""))
+                        .putString("sesion_token_cajero", nuevoTokenSesion)
+                        .putLong("cajero_inicio_turno_ms", nowMs)
+                        .putString("cajero_hora_inicio", hora)
+                        .putString("cajero_fecha_inicio", fecha)
+                        .putBoolean("cajero_logueado", true)
+                        .putBoolean("es_celular_dueño_receptor", false)
+                        .apply()
+                    runOnUiThread {
+                        timestampInicioTurnoCajero = nowMs
+                        horaInicioTurnoStr = hora
+                        fechaInicioTurnoStr = fecha
+                        esSesionDueño = false
+                        verificarAsistentePermisosOEntrar()
+                    }
+                } else {
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, resJson.optString("mensaje", "No se pudo iniciar sesión"), Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {}
+        }
     }
 
     private fun entrarDirectoAlSistema() {
@@ -907,7 +989,30 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun cerrarSesionCajaFinal() {
         jobSincronizador?.cancel()
-        getSharedPreferences("YapePrefs", Context.MODE_PRIVATE).edit().putBoolean("cajero_logueado", false).apply()
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        val cod = prefs.getString("codigo_tienda", "") ?: ""
+        val caj = prefs.getString("cajero_activo", "") ?: ""
+        val tok = prefs.getString("sesion_token_cajero", "") ?: ""
+        if (cod.isNotEmpty() && caj.isNotEmpty()) {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val json = JSONObject().apply {
+                        put("accion", "cerrar_sesion_cajero")
+                        put("codigoTienda", cod)
+                        put("nombreCajero", caj)
+                        put("sesionToken", tok)
+                    }
+                    val b = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                    client.newCall(Request.Builder().url(SERVIDOR_URL).post(b).build()).execute().close()
+                } catch (e: Exception) {}
+            }
+        }
+        prefs.edit()
+            .putBoolean("cajero_logueado", false)
+            .remove("sesion_token_cajero")
+            .remove("monto_esperado_pos")
+            .remove("cajero_orden_pos")
+            .apply()
         timestampInicioTurnoCajero = 0L
         mostrarSeccion(layoutPortada)
     }
@@ -922,22 +1027,39 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com/send?text=" + Uri.encode(msg))))
     }
 
-    private fun exportarHistorialCSV() {
-        val db = OfflineDatabaseHelper(this)
-        val array = db.obtenerHistorialComoJsonArray(200)
-        val sb = StringBuilder()
-        sb.append("ID,Fecha,Hora,Cliente,Metodo,Monto_PEN,Cajero,Estado_Sincronizacion\n")
-        for (i in 0 until array.length()) {
-            val item = array.getJSONObject(i)
-            val syncTxt = if (item.optBoolean("sincronizado", true)) "Sincronizado en Nube" else "Guardado Local SQLite"
-            sb.append("${item.optLong("id")},${item.optString("fecha")},${item.optString("hora")},\"${item.optString("nombre")}\",${item.optString("metodo")},${item.optString("monto")},${item.optString("cajero")},$syncTxt\n")
+    private fun descargarOesAbrirGoogleSheet() {
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        val sheetUrl = (prefs.getString("sheet_url_cliente", "") ?: "").trim()
+        if (sheetUrl.isEmpty()) {
+            Toast.makeText(this, "Tu hoja de Google Sheets se activa automáticamente con tu cuenta de Dueño.", Toast.LENGTH_LONG).show()
+            return
         }
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/csv"
-            putExtra(Intent.EXTRA_SUBJECT, "Historial Contable YapeAlDía CSV")
-            putExtra(Intent.EXTRA_TEXT, sb.toString())
+
+        val urlDescargaXlsx = if (sheetUrl.contains("/edit")) {
+            sheetUrl.substringBefore("/edit") + "/export?format=xlsx"
+        } else {
+            "$sheetUrl/export?format=xlsx"
         }
-        startActivity(Intent.createChooser(intent, "Exportar CSV Contable"))
+
+        AlertDialog.Builder(this)
+            .setTitle("📊 Reporte Contable en Google Sheets")
+            .setMessage("Elige cómo deseas obtener el registro oficial de ventas de tu negocio:")
+            .setPositiveButton("📥 Descargar Excel (.xlsx)") { _, _ ->
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(urlDescargaXlsx)))
+                } catch (e: Exception) {
+                    Toast.makeText(this, "No se pudo iniciar la descarga", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNeutralButton("🌐 Abrir Google Sheets en Vivo") { _, _ ->
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(sheetUrl)))
+                } catch (e: Exception) {
+                    Toast.makeText(this, "No se pudo abrir Google Sheets", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
     private fun abrirSelectorCalendario() {
@@ -1002,11 +1124,55 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
         } catch (e: Exception) {}
 
-        val tLector = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")?.contains(packageName) == true
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         val tBat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) pm.isIgnoringBatteryOptimizations(packageName) else true
         val tNot = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED else true
 
+        // Si es Cajero, NO le pedimos el Lector de Notificaciones (para proteger su Yape personal)
+        if (!esSesionDueño) {
+            if (tBat && tNot) return
+            val layCaj = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(40, 30, 40, 20)
+            }
+            layCaj.addView(TextView(this).apply {
+                text = "🛒 Modo Cajero Seguro (Sin leer tu Yape personal)"
+                textSize = 16f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.parseColor(COLOR_PRIMARY))
+            })
+            layCaj.addView(TextView(this).apply {
+                text = "Tu celular NO leerá tus notificaciones personales de Yape. Solo activa estas 2 opciones para que tu teléfono cante los cobros de la tienda:"
+                textSize = 13f
+                setTextColor(Color.parseColor(if (esModoOscuro) "#CBD5E1" else "#475569"))
+                setPadding(0, 10, 0, 15)
+            })
+            layCaj.addView(crearBotonPrimario(
+                this,
+                if (tNot) "✅ 1. Alertas de Cobro (Permitido)" else "📢 1. Permitir Alertas de Cobro"
+            ) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+                }
+            }.apply {
+                background = crearBordeRedondo(if (tNot) "#10B981" else "#0284C7", if (tNot) "#059669" else "#0284C7", 16f)
+            })
+            layCaj.addView(crearBotonPrimario(
+                this,
+                if (tBat) "✅ 2. Batería Sin Restricciones (Listo)" else "🔋 2. Mantener Activo en Segundo Plano"
+            ) {
+                solicitarSinRestriccionesBateria()
+            }.apply {
+                background = crearBordeRedondo(if (tBat) "#10B981" else "#D97706", if (tBat) "#059669" else "#D97706", 16f)
+            })
+            AlertDialog.Builder(this)
+                .setView(layCaj)
+                .setPositiveButton("Entrar a Caja 🚀") { d, _ -> d.dismiss() }
+                .show()
+            return
+        }
+
+        val tLector = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")?.contains(packageName) == true
         val completados = (if (tLector) 1 else 0) + (if (tNot) 1 else 0) + (if (tBat) 1 else 0)
 
         if (tLector && tBat && tNot) {
@@ -1022,13 +1188,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         val txtTit = TextView(this).apply {
-            text = "🛡️ Escudo 24/7 (Dueño y Cajero) • $completados de 3 listos"
+            text = "🛡️ Escudo 24/7 (Celular del Dueño) • $completados de 3 listos"
             textSize = 17f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_PRIMARY))
         }
         val txtDesc = TextView(this).apply {
-            text = "Activa estos 3 permisos para que YapeAlDía cante y guarde tus cobros aunque la app esté minimizada o con la pantalla apagada en el bolsillo:"
+            text = "Activa estos 3 permisos en el celular del Dueño para que YapeAlDía detecte, cante y guarde los cobros aunque la pantalla esté apagada:"
             textSize = 13f
             setTextColor(Color.parseColor(if (esModoOscuro) "#CBD5E1" else "#475569"))
             setPadding(0, 10, 0, 15)
@@ -1258,14 +1424,32 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         }
                     }
 
-                    // 2. Consultar cobros actualizados desde el servidor en la nube
+                    // 2. Consultar cobros actualizados desde el servidor en la nube y verificar sesión única de cajero
                     try {
-                        val url = "$SERVIDOR_URL?accion=consultar_cobros&codigoTienda=$cod&fechaFiltro=$fechaSeleccionadaFiltro"
+                        val cajeroAct = Uri.encode(prefs.getString("cajero_activo", "") ?: "")
+                        val tokenSes = Uri.encode(prefs.getString("sesion_token_cajero", "") ?: "")
+                        val url = "$SERVIDOR_URL?accion=consultar_cobros&codigoTienda=$cod&fechaFiltro=$fechaSeleccionadaFiltro&cajero=$cajeroAct&sesionToken=$tokenSes"
                         val req = Request.Builder().url(url).get().build()
                         val res = client.newCall(req).execute()
                         val jsonStr = res.body?.string() ?: "[]"
                         res.close()
-                        val array = JSONArray(jsonStr)
+
+                        if (jsonStr.trim().startsWith("{")) {
+                            val objResp = JSONObject(jsonStr)
+                            if (!esSesionDueño && objResp.optBoolean("sesion_desplazada", false)) {
+                                withContext(Dispatchers.Main) {
+                                    cerrarSesionCajaFinal()
+                                    AlertDialog.Builder(this@MainActivity)
+                                        .setTitle("🔒 Turno abierto en otro celular")
+                                        .setMessage("Tu usuario de cajero se acaba de abrir en otro dispositivo. Por seguridad se cerró la sesión en este teléfono para evitar que se mezclen los turnos.")
+                                        .setPositiveButton("Entendido", null)
+                                        .show()
+                                }
+                                break
+                            }
+                        }
+
+                        val array = if (jsonStr.trim().startsWith("[")) JSONArray(jsonStr) else JSONArray()
 
                         if (array.length() > 0) {
                             val ultimoCobro = array.getJSONObject(0)
@@ -1273,19 +1457,58 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             val monto = ultimoCobro.optString("monto", "0.00")
                             val nombre = ultimoCobro.optString("nombre", "Cliente")
 
+                            // Si el registro indica cambio de token de sesión para este cajero, expulsar sesión duplicada
+                            val tokenServidorCajero = ultimoCobro.optString("sesionTokenCajero", "")
+                            val miTokenActual = prefs.getString("sesion_token_cajero", "") ?: ""
+                            if (!esSesionDueño && tokenServidorCajero.isNotEmpty() && miTokenActual.isNotEmpty() && tokenServidorCajero != miTokenActual) {
+                                withContext(Dispatchers.Main) {
+                                    cerrarSesionCajaFinal()
+                                    AlertDialog.Builder(this@MainActivity)
+                                        .setTitle("🔒 Turno abierto en otro celular")
+                                        .setMessage("Este cajero inició sesión en otro celular. Se cerró este equipo automáticamente.")
+                                        .setPositiveButton("Entendido", null)
+                                        .show()
+                                }
+                                break
+                            }
+
                             if (ultimoIdCobroConocido == -1) {
                                 ultimoIdCobroConocido = idCobro
                             } else if (idCobro > ultimoIdCobroConocido) {
                                 ultimoIdCobroConocido = idCobro
+                                val ultimoCobroLocalMs = prefs.getLong("ultimo_cobro_local_ms", 0L)
+                                val yaFueCantadoEnEsteCelular = (System.currentTimeMillis() - ultimoCobroLocalMs) < 30_000L
+
+                                val montoRecibidoDouble = monto.replace(",", ".").toDoubleOrNull() ?: 0.0
+                                val montoEsperadoStr = prefs.getString("monto_esperado_pos", "") ?: ""
+                                val montoEsperadoDouble = montoEsperadoStr.toDoubleOrNull() ?: 0.0
+
                                 withContext(Dispatchers.Main) {
-                                    if (prefs.getBoolean("voz_activa", true) && vozLista) {
-                                        reproducirTimbreYVozLocal(monto)
+                                    // Solo cantamos desde el sincronizador si este cobro NO fue cantado ya por el lector local de este mismo teléfono
+                                    if (!yaFueCantadoEnEsteCelular && prefs.getBoolean("voz_activa", true) && vozLista) {
+                                        reproducirTimbreYVozLocal(monto, montoRecibidoDouble, montoEsperadoDouble)
                                     }
-                                    imgQrPOS.visibility = View.GONE
-                                    txtMontoQrPOS.visibility = View.GONE
-                                    montoTecladoPOS = ""
-                                    txtMontoDisplayPOS.text = "S/ 0.00"
-                                    Toast.makeText(this@MainActivity, "✅ ¡Cobro confirmado! S/ $monto de $nombre", Toast.LENGTH_LONG).show()
+
+                                    if (montoEsperadoDouble > 0.0 && montoRecibidoDouble > 0.0 && montoRecibidoDouble < (montoEsperadoDouble - 0.01)) {
+                                        val faltante = String.format(Locale.US, "%.2f", montoEsperadoDouble - montoRecibidoDouble)
+                                        txtMontoQrPOS.text = "⚠️ Pago incompleto: llegó S/ $monto de S/ $montoEsperadoStr (Falta S/ $faltante)"
+                                        txtMontoQrPOS.setTextColor(Color.parseColor("#DC2626"))
+                                        Toast.makeText(
+                                            this@MainActivity,
+                                            "⚠️ ¡Atención! Recibido S/ $monto, pero el cobro era S/ $montoEsperadoStr. ¡Falta S/ $faltante!",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    } else {
+                                        prefs.edit().remove("monto_esperado_pos").remove("cajero_orden_pos").apply()
+                                        imgQrPOS.visibility = View.GONE
+                                        txtMontoQrPOS.visibility = View.GONE
+                                        txtMontoQrPOS.setTextColor(Color.parseColor(COLOR_PRIMARY))
+                                        montoTecladoPOS = ""
+                                        txtMontoDisplayPOS.text = "S/ 0.00"
+                                        if (!yaFueCantadoEnEsteCelular) {
+                                            Toast.makeText(this@MainActivity, "✅ ¡Cobro confirmado! S/ $monto de $nombre", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
                                 }
                             }
                             withContext(Dispatchers.Main) { actualizarListaCaja(array) }
@@ -1301,7 +1524,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun reproducirTimbreYVozLocal(monto: String) {
+    private fun reproducirTimbreYVozLocal(
+        monto: String,
+        montoRecibido: Double = 0.0,
+        montoEsperado: Double = 0.0
+    ) {
         CoroutineScope(Dispatchers.Default).launch {
             try {
                 val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -1311,7 +1538,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 delay(220); tg.release()
             } catch (e: Exception) {}
             val frase = if (monto == "1" || monto == "1.00") "un sol" else "$monto soles"
-            motorVozCajero?.speak("¡Te llegó un cobro de $frase! ¡A seguir sumando!", TextToSpeech.QUEUE_FLUSH, null, "TTS_CAJA")
+            val mensajeVoz = if (montoEsperado > 0.0 && montoRecibido > 0.0 && montoRecibido < (montoEsperado - 0.01)) {
+                val faltante = String.format(Locale.US, "%.2f", montoEsperado - montoRecibido).removeSuffix(".00")
+                val esperadoTxt = String.format(Locale.US, "%.2f", montoEsperado).removeSuffix(".00")
+                "¡Atención caja! Se recibió $frase, pero el cobro era de $esperadoTxt soles. ¡Faltan $faltante soles!"
+            } else {
+                "¡Te llegó un cobro de $frase! ¡A seguir sumando!"
+            }
+            motorVozCajero?.speak(mensajeVoz, TextToSpeech.QUEUE_FLUSH, null, "TTS_CAJA")
         }
     }
 
@@ -1335,14 +1569,26 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         var conteo = 0
         val fechaHoy = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
 
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        val miCajeroActivo = (prefs.getString("cajero_activo", "") ?: "").trim()
+
         for (i in 0 until minOf(array.length(), 25)) {
             val item = array.getJSONObject(i)
             val mStr = item.optString("monto", "0.00")
             val fStr = item.optString("fecha", "")
             val tsItem = item.optLong("timestamp", 0L)
+            val cajeroItem = item.optString("cajero", "").trim()
 
             if (!esSesionDueño) {
                 if (timestampInicioTurnoCajero > 0L && tsItem < timestampInicioTurnoCajero) continue
+                // Separación multi-cajero: si el cobro fue asignado específicamente a otro cajero, no mezclarlo en esta caja
+                if (cajeroItem.isNotEmpty() &&
+                    !cajeroItem.equals(miCajeroActivo, ignoreCase = true) &&
+                    !cajeroItem.equals("Caja", ignoreCase = true) &&
+                    !cajeroItem.equals("Dueño", ignoreCase = true)
+                ) {
+                    continue
+                }
             } else {
                 if (fechaSeleccionadaFiltro.isNotEmpty() && fStr != fechaSeleccionadaFiltro) continue
                 else if (fechaSeleccionadaFiltro.isEmpty() && fStr != fechaHoy) continue
@@ -1359,8 +1605,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 elevation = 2f
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 0, 0, 6) }
             }
+            val etiqCajero = if (cajeroItem.isNotEmpty()) " • 👤 $cajeroItem" else ""
             row.addView(TextView(this).apply {
-                text = "${item.optString("nombre")} (${item.optString("hora")})"
+                text = "${item.optString("nombre")} (${item.optString("hora")}$etiqCajero)"
                 textSize = 14f; setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A"))
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -1424,14 +1671,216 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun recargarListaCajeros(prefs: android.content.SharedPreferences) {
         layoutListaCajerosAdmin.removeAllViews()
         val arr = JSONArray(prefs.getString("lista_cajeros", "[]") ?: "[]")
+        if (arr.length() == 0) {
+            layoutListaCajerosAdmin.addView(TextView(this).apply {
+                text = "Aún no has creado cajeros autorizados."
+                textSize = 13f
+                setTextColor(Color.parseColor("#64748B"))
+                setPadding(0, 8, 0, 8)
+            })
+            return
+        }
         for (i in 0 until arr.length()) {
             val c = arr.getJSONObject(i)
-            layoutListaCajerosAdmin.addView(TextView(this).apply {
-                text = "• ${c.getString("nombre")} (PIN: ${c.getString("pin")})"
-                textSize = 14f; setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#334155"))
-                setPadding(0, 4, 0, 4)
-            })
+            val nombreCaj = c.optString("nombre", "Cajero")
+            val pinCaj = c.optString("pin", "0000")
+
+            val filaCajero = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(16, 12, 16, 12)
+                background = crearBordeRedondo(if (esModoOscuro) "#0F172A" else "#F8FAFC", if (esModoOscuro) "#334155" else "#E2E8F0", 14f)
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    setMargins(0, 6, 0, 6)
+                }
+            }
+
+            val txtInfo = TextView(this).apply {
+                text = "👤 $nombreCaj  •  🔑 PIN: $pinCaj"
+                textSize = 14f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#334155"))
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+
+            val btnEditar = Button(this).apply {
+                text = "✏️"
+                textSize = 13f
+                background = crearBordeRedondo("#EFF6FF", "#93C5FD", 10f)
+                setPadding(12, 6, 12, 6)
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    setMargins(6, 0, 6, 0)
+                }
+                setOnClickListener {
+                    mostrarDialogoEditarCajero(prefs, i, nombreCaj, pinCaj)
+                }
+            }
+
+            val btnEliminar = Button(this).apply {
+                text = "🗑️"
+                textSize = 13f
+                background = crearBordeRedondo("#FEF2F2", "#FCA5A5", 10f)
+                setPadding(12, 6, 12, 6)
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                setOnClickListener {
+                    confirmarEliminarCajero(prefs, i, nombreCaj)
+                }
+            }
+
+            filaCajero.addView(txtInfo)
+            filaCajero.addView(btnEditar)
+            filaCajero.addView(btnEliminar)
+            layoutListaCajerosAdmin.addView(filaCajero)
         }
+    }
+
+    private fun mostrarDialogoEditarCajero(
+        prefs: android.content.SharedPreferences,
+        index: Int,
+        nombreActual: String,
+        pinActual: String
+    ) {
+        val lay = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(50, 24, 50, 12)
+        }
+        val inNuevoNombre = crearInputFintech(this, "Nombre del Cajero").apply { setText(nombreActual) }
+        val inNuevoPin = crearInputFintech(this, "PIN (4 dígitos)").apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setText(pinActual)
+        }
+        lay.addView(inNuevoNombre)
+        lay.addView(inNuevoPin)
+
+        AlertDialog.Builder(this)
+            .setTitle("✏️ Editar Cajero Autorizado")
+            .setView(lay)
+            .setPositiveButton("Guardar Cambios") { _, _ ->
+                val nNuevo = inNuevoNombre.text.toString().trim()
+                val pNuevo = inNuevoPin.text.toString().trim()
+                if (nNuevo.isEmpty() || pNuevo.length < 4) {
+                    Toast.makeText(this, "Ingresa un nombre válido y un PIN de al menos 4 dígitos", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val arr = JSONArray(prefs.getString("lista_cajeros", "[]") ?: "[]")
+                if (index in 0 until arr.length()) {
+                    arr.put(index, JSONObject().apply {
+                        put("nombre", nNuevo)
+                        put("pin", pNuevo)
+                    })
+                    prefs.edit().putString("lista_cajeros", arr.toString()).apply()
+                    recargarListaCajeros(prefs)
+                    val cod = prefs.getString("codigo_tienda", "") ?: ""
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            val json = JSONObject().apply {
+                                put("accion", "editar_cajero")
+                                put("codigoTienda", cod)
+                                put("nombreAnterior", nombreActual)
+                                put("nombreCajero", nNuevo)
+                                put("pinCajero", pNuevo)
+                            }
+                            val b = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                            client.newCall(Request.Builder().url(SERVIDOR_URL).post(b).build()).execute().close()
+                        } catch (e: Exception) {}
+                    }
+                    Toast.makeText(this, "✅ Cajero actualizado correctamente", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun confirmarEliminarCajero(
+        prefs: android.content.SharedPreferences,
+        index: Int,
+        nombreCajero: String
+    ) {
+        AlertDialog.Builder(this)
+            .setTitle("🗑️ Eliminar Cajero")
+            .setMessage("¿Estás seguro de eliminar al cajero '$nombreCajero'? Ya no podrá iniciar turno con su PIN.")
+            .setPositiveButton("Sí, Eliminar") { _, _ ->
+                val arr = JSONArray(prefs.getString("lista_cajeros", "[]") ?: "[]")
+                val nuevoArr = JSONArray()
+                for (i in 0 until arr.length()) {
+                    if (i != index) nuevoArr.put(arr.getJSONObject(i))
+                }
+                prefs.edit().putString("lista_cajeros", nuevoArr.toString()).apply()
+                recargarListaCajeros(prefs)
+                val cod = prefs.getString("codigo_tienda", "") ?: ""
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val json = JSONObject().apply {
+                            put("accion", "eliminar_cajero")
+                            put("codigoTienda", cod)
+                            put("nombreCajero", nombreCajero)
+                        }
+                        val b = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                        client.newCall(Request.Builder().url(SERVIDOR_URL).post(b).build()).execute().close()
+                    } catch (e: Exception) {}
+                }
+                Toast.makeText(this, "🗑️ Cajero eliminado", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    /**
+     * Inyecta el Tag 54 (Transaction Amount) en tramas EMVCo de Yape/Plin y recalcula
+     * la firma CRC-16/CCITT-FALSE (Tag 6304) para que la app bancaria reconozca el monto.
+     */
+    private fun inyectarMontoEMVCoConCRC16(qrBase: String, monto: Double): String {
+        val limpio = qrBase.trim()
+        if (!limpio.startsWith("000201") || monto <= 0.0) {
+            return limpio
+        }
+        return try {
+            val montoStr = String.format(Locale.US, "%.2f", monto)
+            val tag54 = "54" + String.format(Locale.US, "%02d", montoStr.length) + montoStr
+
+            // Quitar el CRC final (6304XXXX) si está presente
+            val idxCrc = limpio.lastIndexOf("6304")
+            var cuerpoSinCrc = if (idxCrc != -1 && idxCrc >= limpio.length - 8) {
+                limpio.substring(0, idxCrc)
+            } else {
+                limpio
+            }
+
+            // Cambiar de QR estático (010211) a QR dinámico con monto (010212)
+            cuerpoSinCrc = cuerpoSinCrc.replaceFirst("010211", "010212")
+
+            // Remover Tag 54 previo si existiera o insertar antes de 5802PE / 5303604
+            val idxPais = cuerpoSinCrc.indexOf("5802PE")
+            val nuevoCuerpo = if (idxPais != -1) {
+                cuerpoSinCrc.substring(0, idxPais) + tag54 + cuerpoSinCrc.substring(idxPais)
+            } else {
+                cuerpoSinCrc + tag54
+            }
+
+            val tramaParaCrc = nuevoCuerpo + "6304"
+            val crcHex = calcularCRC16CCITT(tramaParaCrc)
+            tramaParaCrc + crcHex
+        } catch (e: Exception) {
+            limpio
+        }
+    }
+
+    private fun calcularCRC16CCITT(texto: String): String {
+        var crc = 0xFFFF
+        val polynomial = 0x1021
+        val bytes = texto.toByteArray(Charsets.UTF_8)
+        for (b in bytes) {
+            for (i in 0..7) {
+                val bit = ((b.toInt() shr (7 - i)) and 1) == 1
+                val c15 = ((crc shr 15) and 1) == 1
+                crc = crc shl 1
+                if (c15 xor bit) {
+                    crc = crc xor polynomial
+                }
+            }
+        }
+        crc = crc and 0xFFFF
+        return String.format(Locale.US, "%04X", crc)
     }
 
     private fun generarBitmapQr(contenido: String, ancho: Int, alto: Int): Bitmap? {
