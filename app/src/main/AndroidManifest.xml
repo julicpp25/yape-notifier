@@ -4,13 +4,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher"
-        android:label="YapeAlDía"
+        android:label="NotiCobros: Alertas Yape y Plin"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.Light">
 
@@ -33,10 +32,10 @@
             </intent-filter>
         </service>
 
-        <!-- Lector de Notificaciones de Yape/Plin -->
+        <!-- Lector de Notificaciones de Yape/Plin (Requiere Declaración de Special App Access en Play Console) -->
         <service
             android:name=".YapeListenerService"
-            android:label="Lector Yape"
+            android:label="Lector de Pagos NotiCobros"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -45,4 +44,5 @@
         </service>
 
     </application>
+
 </manifest>

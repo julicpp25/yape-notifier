@@ -12,6 +12,11 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.common.HybridBinarizer
+import com.google.zxing.qrcode.QRCodeReader
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -51,6 +56,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private val REQ_GOOGLE_PICKER_REGISTRO = 1001
     private val REQ_GOOGLE_PICKER_LOGIN = 1002
+    private val REQ_SELECCIONAR_IMAGEN_QR = 1005
 
     private val COLOR_PRIMARY = "#6B1D7B"
     private val COLOR_ACCENT = "#00D2B4"
@@ -390,7 +396,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val cardP1 = crearTarjetaFintech(this)
         cardP1.addView(TextView(this).apply { text = "🔔 Paso 1 de 3: Lector de Notificaciones"; textSize = 18f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
         cardP1.addView(TextView(this).apply { text = "🔒 100% Seguro: YapeAlDía NO toca tu dinero ni pide claves bancarias. Solo escucha el aviso para cantar el cobro por el altavoz y guardarlo automáticamente."; textSize = 13f; setTextColor(Color.parseColor("#475569")); setPadding(0, 8, 0, 12) })
-        cardP1.addView(crearBotonPrimario(this, "ACTIVAR LECTOR DE NOTIFICACIONES") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
+        cardP1.addView(crearBotonPrimario(this, "ACTIVAR LECTOR DE NOTIFICACIONES") { mostrarDivulgacionProminenteNotificaciones() })
         cardP1.addView(Button(this).apply { text = "⚠️ ¿Te sale 'Ajuste restringido'? Toca aquí"; setTextColor(Color.parseColor("#B45309")); setBackgroundColor(Color.TRANSPARENT); setOnClickListener { mostrarDialogoAjustesRestringidos() } })
         cardP1.addView(crearBotonSecundario(this, "Siguiente Paso ➡️") { mostrarSeccion(layoutPermiso2Alertas) })
         layoutPermiso1Lector.addView(cardP1)
@@ -555,6 +561,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val cardQRTab = crearTarjetaFintech(this)
         inQrConfigTabCajeros = crearInputFintech(this, "Pega el texto de tu QR de Yape (000201...)").apply { setText(prefs.getString("qr_base_yape", "")) }
+        val btnAdjuntarImgQR = crearBotonSecundario(this, "📷 Adjuntar Imagen de mi QR (Galería)") { abrirGaleriaParaQR() }
+        cardQRTab.addView(btnAdjuntarImgQR)
         val btnSaveQR = crearBotonPrimario(this, "Guardar mi QR de Yape 💾") {
             val qRaw = inQrConfigTabCajeros.text.toString().trim()
             val cod = prefs.getString("codigo_tienda", "") ?: ""
@@ -886,6 +894,67 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 Toast.makeText(this, "PIN actual incorrecto o nuevo inválido", Toast.LENGTH_SHORT).show()
             }
         }.setNegativeButton("Cancelar", null).show()
+    }
+
+        private fun abrirGaleriaParaQR() {
+        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+            type = "image/*"
+            addCategory(Intent.CATEGORY_OPENABLE)
+        }
+        startActivityForResult(intent, REQ_SELECCIONAR_IMAGEN_QR)
+    }
+
+    private fun procesarImagenQrSeleccionada(uri: Uri) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val inputStream = contentResolver.openInputStream(uri)
+                val bitmap = BitmapFactory.decodeStream(inputStream)
+                inputStream?.close()
+
+                if (bitmap == null) {
+                    runOnUiThread { Toast.makeText(this@MainActivity, "No se pudo cargar la imagen", Toast.LENGTH_SHORT).show() }
+                    return@launch
+                }
+
+                val intArray = IntArray(bitmap.width * bitmap.height)
+                bitmap.getPixels(intArray, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                val source = RGBLuminanceSource(bitmap.width, bitmap.height, intArray)
+                val binaryBitmap = BinaryBitmap(HybridBinarizer(source))
+                val reader = QRCodeReader()
+                val result = reader.decode(binaryBitmap)
+                val textoQr = result.text
+
+                val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+                var cod = prefs.getString("codigo_tienda", "") ?: ""
+                if (cod.isEmpty()) {
+                    cod = "TIENDA-" + (1000..9999).random()
+                    prefs.edit().putString("codigo_tienda", cod).apply()
+                }
+
+                prefs.edit().putString("qr_base_yape", textoQr).apply()
+
+                val json = JSONObject().apply {
+                    put("accion", "guardar_qr")
+                    put("codigoTienda", cod)
+                    put("qrBase", textoQr)
+                }
+                val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                client.newCall(Request.Builder().url(SERVIDOR_URL).post(body).build()).execute().close()
+
+                runOnUiThread {
+                    inQrConfigTabCajeros.setText(textoQr)
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("¡QR de Yape Vinculado! 🎉")
+                        .setMessage("Código QR decodificado exitosamente.\n\nID de Tienda: $cod\n\nAhora tu QR está listo para cobrar en la caja con el monto dinámico.")
+                        .setPositiveButton("Genial", null)
+                        .show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "No se encontró un código QR válido en la imagen. Intenta con una captura más nítida.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
