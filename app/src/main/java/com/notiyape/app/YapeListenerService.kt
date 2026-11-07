@@ -1,10 +1,19 @@
 package com.notiyape.app
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.speech.tts.TextToSpeech
@@ -173,11 +182,91 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
 
     override fun onCreate() {
         super.onCreate()
+        iniciarEscudoForeground24x7()
         try {
             motorVoz = TextToSpeech(this, this, "com.google.android.tts")
         } catch (e: Exception) {
             motorVoz = TextToSpeech(this, this)
         }
+    }
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        iniciarEscudoForeground24x7()
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        // ESCUDO AUTO-RECONEXIÓN: Si el sistema intenta desconectar el lector, se reconecta solo
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                requestRebind(ComponentName(this, YapeListenerService::class.java))
+            } catch (e: Exception) {}
+        }
+    }
+
+    private fun iniciarEscudoForeground24x7() {
+        try {
+            val channelId = "yapealdia_guardia_24x7"
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val canal = NotificationChannel(
+                    channelId,
+                    "Guardia 24/7 YapeAlDía",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Mantiene el lector de cobros activo con pantalla apagada o minimizada"
+                    setShowBadge(false)
+                }
+                nm.createNotificationChannel(canal)
+            }
+
+            val intent = Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+            val pi = PendingIntent.getActivity(
+                this,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notif = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(this, channelId)
+                    .setSmallIcon(android.R.drawable.ic_lock_idle_charging)
+                    .setContentTitle("🟢 YapeAlDía Activo 24/7")
+                    .setContentText("Escuchando y sincronizando cobros en segundo plano")
+                    .setOngoing(true)
+                    .setContentIntent(pi)
+                    .build()
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(this)
+                    .setSmallIcon(android.R.drawable.ic_lock_idle_charging)
+                    .setContentTitle("🟢 YapeAlDía Activo 24/7")
+                    .setContentText("Escuchando y sincronizando cobros en segundo plano")
+                    .setOngoing(true)
+                    .setContentIntent(pi)
+                    .build()
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(777, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(777, notif)
+            }
+        } catch (e: Exception) {}
+    }
+
+    private fun adquirirWakeLockTemporal(duracionMs: Long = 6500L) {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val wl = pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "YapeAlDia::CobroWakeLock"
+            )
+            wl.acquire(duracionMs)
+        } catch (e: Exception) {}
     }
 
     override fun onInit(status: Int) {
@@ -287,15 +376,36 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             }
         }
 
+        // Despertar procesador durante 6.5 segundos aunque la pantalla esté apagada o bloqueada
+        adquirirWakeLockTemporal(6500L)
+
         // Anuncio en voz alta con timbre previo y frase aleatoria
         if (prefs.getBoolean("voz_activa", true)) {
             reproducirTimbreYVoz(metodo, monto)
         }
 
+        val cajeroActual = prefs.getString("cajero_activo", "Caja") ?: "Caja"
+        val nowMs = System.currentTimeMillis()
+        val horaActual = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(nowMs))
+        val fechaHoy = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(nowMs))
+
+        // 1. RESPALDO OFFLINE INMEDIATO EN SQLITE LOCAL (Nunca se pierde aunque no haya señal)
+        val dbHelper = OfflineDatabaseHelper(this)
+        val idFilaSQLite = dbHelper.insertarCobroLocal(
+            codigoTienda = codigoTienda,
+            nombre = remitente,
+            monto = monto,
+            metodo = metodo,
+            cajero = cajeroActual,
+            fecha = fechaHoy,
+            hora = horaActual,
+            timestamp = nowMs,
+            sincronizado = false
+        )
+
         guardarCobroLocal(remitente, monto, metodo)
 
-        // Enviar a la nube (Google Apps Script -> FCM Push + Sheets)
-        val cajeroActual = prefs.getString("cajero_activo", "Caja") ?: "Caja"
+        // 2. Intentar enviar a la nube y sincronizar cola offline pendiente si hay conexión
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val json = JSONObject().apply {
@@ -303,12 +413,49 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                     put("nombre", "$remitente ($metodo)")
                     put("monto", monto)
                     put("cajero", cajeroActual)
+                    put("fecha", fechaHoy)
+                    put("hora", horaActual)
+                    put("timestamp", nowMs)
                 }
                 val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
                 val request = Request.Builder().url(SERVIDOR_URL).post(body).build()
-                client.newCall(request).execute().close()
+                val response = client.newCall(request).execute()
+                val exito = response.isSuccessful
+                response.close()
+
+                if (exito && idFilaSQLite != -1L) {
+                    dbHelper.marcarComoSincronizado(idFilaSQLite)
+                    sincronizarColaPendienteSQLite(dbHelper)
+                }
             } catch (e: Exception) {
-                e.printStackTrace()
+                // Sin conexión a internet: El cobro ya quedó resguardado en SQLite local (sincronizado = 0)
+                // Se enviará automáticamente cuando retorne la señal.
+            }
+        }
+    }
+
+    private fun sincronizarColaPendienteSQLite(dbHelper: OfflineDatabaseHelper) {
+        val pendientes = dbHelper.obtenerCobrosPendientes()
+        for (item in pendientes) {
+            try {
+                val json = JSONObject().apply {
+                    put("codigoTienda", item.codigoTienda)
+                    put("nombre", "${item.nombre} (${item.metodo})")
+                    put("monto", item.monto)
+                    put("cajero", item.cajero)
+                    put("fecha", item.fecha)
+                    put("hora", item.hora)
+                    put("timestamp", item.timestamp)
+                }
+                val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                val req = Request.Builder().url(SERVIDOR_URL).post(body).build()
+                val res = client.newCall(req).execute()
+                if (res.isSuccessful) {
+                    dbHelper.marcarComoSincronizado(item.idLocal)
+                }
+                res.close()
+            } catch (e: Exception) {
+                break
             }
         }
     }

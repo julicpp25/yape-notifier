@@ -12,9 +12,21 @@ android {
         applicationId = "com.notiyape.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        create("release") {
+            val keystoreFile = file("yapealdia-release.jks")
+            if (keystoreFile.exists()) {
+                storeFile = keystoreFile
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "YapeAlDia2026"
+                keyAlias = System.getenv("KEY_ALIAS") ?: "yapealdia"
+                keyPassword = System.getenv("KEY_PASSWORD") ?: "YapeAlDia2026"
+            }
+        }
     }
 
     buildTypes {
@@ -25,7 +37,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug") // Configurable para clave release
+            val keystoreFile = file("yapealdia-release.jks")
+            signingConfig = if (keystoreFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
         debug {
             isMinifyEnabled = false
@@ -46,7 +63,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("com.google.zxing:core:3.5.3")
-    
+
     // Librería oficial de Notificaciones Push de Google Firebase
     implementation(platform("com.google.firebase:firebase-bom:33.4.0"))
     implementation("com.google.firebase:firebase-messaging")

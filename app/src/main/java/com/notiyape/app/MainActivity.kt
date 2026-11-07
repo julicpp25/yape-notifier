@@ -33,6 +33,7 @@ import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.view.Gravity
 import android.view.View
+import android.view.WindowManager
 import android.widget.*
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.zxing.BarcodeFormat
@@ -445,6 +446,30 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val barraSubCaja = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, 10) }
         txtInfoCajero = TextView(this).apply { textSize = 14f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A")); layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) }
         switchVozCaja = Switch(this).apply { text = "🔊 "; isChecked = prefs.getBoolean("voz_activa", true); setOnCheckedChangeListener { _, isChecked -> prefs.edit().putBoolean("voz_activa", isChecked).apply() } }
+        val btnKeepScreen = Button(this).apply {
+            text = "💡 Pantalla Activa"
+            textSize = 10f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#0F172A"))
+            background = crearBordeRedondo("#FEF08A", "#FACC15", 12f)
+            setPadding(12, 8, 12, 8)
+            var encendida = false
+            setOnClickListener {
+                encendida = !encendida
+                if (encendida) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    text = "💡 Pantalla Fija: ON"
+                    background = crearBordeRedondo("#10B981", "#059669", 12f)
+                    setTextColor(Color.WHITE)
+                    Toast.makeText(this@MainActivity, "💡 Modo Mostrador Activo: La pantalla no se apagará", Toast.LENGTH_SHORT).show()
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    text = "💡 Pantalla Activa"
+                    background = crearBordeRedondo("#FEF08A", "#FACC15", 12f)
+                    setTextColor(Color.parseColor("#0F172A"))
+                }
+            }
+        }
         val btnSalirCaj = Button(this).apply {
             text = "CERRAR SESIÓN"
             textSize = 10f
@@ -454,7 +479,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setPadding(14, 8, 14, 8)
             setOnClickListener { confirmarCierreDeTurno() }
         }
-        barraSubCaja.addView(txtInfoCajero); barraSubCaja.addView(switchVozCaja); barraSubCaja.addView(btnSalirCaj)
+        barraSubCaja.addView(txtInfoCajero); barraSubCaja.addView(switchVozCaja); barraSubCaja.addView(btnKeepScreen); barraSubCaja.addView(btnSalirCaj)
 
         // Filtro Fechas Admin
         cardFiltroFechas = LinearLayout(this).apply {
@@ -498,10 +523,31 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         txtTotalHoyCaja = TextView(this).apply { text = "S/ 0.00"; textSize = 32f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)); setPadding(0, 4, 0, 0) }
         cardTotal.addView(rowTH); cardTotal.addView(txtTotalHoyCaja)
 
-        // POS Táctil
+        // POS Táctil con Montos Rápidos
         val cardPOS = crearTarjetaFintech(this)
         txtMontoDisplayPOS = TextView(this).apply { text = "S/ 0.00"; textSize = 38f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)); gravity = Gravity.CENTER; setPadding(0, 8, 0, 8) }
+        val filaMontosRapidos = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, 4, 0, 10)
+        }
+        listOf("5", "10", "20", "50").forEach { mRapido ->
+            val btnR = Button(this).apply {
+                text = "S/ $mRapido"
+                textSize = 12f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.parseColor(COLOR_PRIMARY))
+                background = crearBordeRedondo("#F3E8F7", "#D8B4E2", 14f)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(4, 0, 4, 0) }
+                setOnClickListener {
+                    montoTecladoPOS = mRapido
+                    txtMontoDisplayPOS.text = "S/ $mRapido.00"
+                }
+            }
+            filaMontosRapidos.addView(btnR)
+        }
         val layTeclado = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        layTeclado.addView(filaMontosRapidos)
         layTeclado.addView(crearFilaTeclado("1", "2", "3"))
         layTeclado.addView(crearFilaTeclado("4", "5", "6"))
         layTeclado.addView(crearFilaTeclado("7", "8", "9"))
@@ -528,6 +574,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardHist.addView(TextView(this).apply { text = "📋 Cobros en Vivo:"; textSize = 15f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A")) })
         cardHist.addView(layoutListaCobrosCaja)
         cardHist.addView(crearBotonSecundario(this, "📲 Enviar Cuadre por WhatsApp") { enviarCuadrePorWhatsApp() })
+        cardHist.addView(crearBotonSecundario(this, "📥 Exportar Historial CSV Contable") { exportarHistorialCSV() })
 
         tabCajaPOS.addView(barraSubCaja); tabCajaPOS.addView(cardFiltroFechas); tabCajaPOS.addView(cardTotal); tabCajaPOS.addView(cardPOS); tabCajaPOS.addView(cardHist)
 
@@ -875,6 +922,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com/send?text=" + Uri.encode(msg))))
     }
 
+    private fun exportarHistorialCSV() {
+        val db = OfflineDatabaseHelper(this)
+        val array = db.obtenerHistorialComoJsonArray(200)
+        val sb = StringBuilder()
+        sb.append("ID,Fecha,Hora,Cliente,Metodo,Monto_PEN,Cajero,Estado_Sincronizacion\n")
+        for (i in 0 until array.length()) {
+            val item = array.getJSONObject(i)
+            val syncTxt = if (item.optBoolean("sincronizado", true)) "Sincronizado en Nube" else "Guardado Local SQLite"
+            sb.append("${item.optLong("id")},${item.optString("fecha")},${item.optString("hora")},\"${item.optString("nombre")}\",${item.optString("metodo")},${item.optString("monto")},${item.optString("cajero")},$syncTxt\n")
+        }
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_SUBJECT, "Historial Contable YapeAlDía CSV")
+            putExtra(Intent.EXTRA_TEXT, sb.toString())
+        }
+        startActivity(Intent.createChooser(intent, "Exportar CSV Contable"))
+    }
+
     private fun abrirSelectorCalendario() {
         val cal = Calendar.getInstance()
         val listener = DatePickerDialog.OnDateSetListener { _, year, monthOfYear, dayOfMonth ->
@@ -927,14 +992,26 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun verificarYMostrarOptimizaciones(alEntrar: Boolean = true) {
+        // Iniciar el servicio en primer plano 24/7 para que funcione con pantalla apagada o minimizado
+        try {
+            val srvIntent = Intent(this, YapeListenerService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(srvIntent)
+            } else {
+                startService(srvIntent)
+            }
+        } catch (e: Exception) {}
+
         val tLector = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")?.contains(packageName) == true
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         val tBat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) pm.isIgnoringBatteryOptimizations(packageName) else true
         val tNot = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED else true
 
+        val completados = (if (tLector) 1 else 0) + (if (tNot) 1 else 0) + (if (tBat) 1 else 0)
+
         if (tLector && tBat && tNot) {
             if (!alEntrar) {
-                Toast.makeText(this, "✅ YapeAlDía está 100% optimizado para operar 24/7", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "✅ Escudo 24/7 Activo (3 de 3 listos). Funciona con pantalla apagada o minimizada.", Toast.LENGTH_LONG).show()
             }
             return
         }
@@ -945,13 +1022,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         val txtTit = TextView(this).apply {
-            text = "⚡ Optimización de Cobros 24/7"
-            textSize = 18f
+            text = "🛡️ Escudo 24/7 (Dueño y Cajero) • $completados de 3 listos"
+            textSize = 17f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_PRIMARY))
         }
         val txtDesc = TextView(this).apply {
-            text = "Para que YapeAlDía cante y registre tus cobros de Yape y Plin sin cerrarse en segundo plano, activa estos 3 permisos en tu celular:"
+            text = "Activa estos 3 permisos para que YapeAlDía cante y guarde tus cobros aunque la app esté minimizada o con la pantalla apagada en el bolsillo:"
             textSize = 13f
             setTextColor(Color.parseColor(if (esModoOscuro) "#CBD5E1" else "#475569"))
             setPadding(0, 10, 0, 15)
@@ -959,40 +1036,37 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         lay.addView(txtTit)
         lay.addView(txtDesc)
 
-        val btnLector = Button(this).apply {
-            text = if (tLector) "✅ 1. Lector Yape y Plin (Activado)" else "🔔 1. Activar Lector Yape y Plin"
-            textSize = 13f
-            setBackgroundColor(Color.parseColor(if (tLector) "#10B981" else "#742284"))
-            setTextColor(Color.WHITE)
-            setOnClickListener {
-                mostrarDivulgacionProminenteNotificaciones()
-            }
+        val btnLector = crearBotonPrimario(
+            this,
+            if (tLector) "✅ 1. Lector Yape y Plin (Activado)" else "🔔 1. Activar Lector Yape y Plin"
+        ) {
+            mostrarDivulgacionProminenteNotificaciones()
+        }.apply {
+            background = crearBordeRedondo(if (tLector) "#10B981" else "#742284", if (tLector) "#059669" else "#742284", 16f)
         }
         lay.addView(btnLector)
 
-        val btnNotif = Button(this).apply {
-            text = if (tNot) "✅ 2. Alertas en Pantalla (Permitido)" else "📢 2. Permitir Notificaciones"
-            textSize = 13f
-            setBackgroundColor(Color.parseColor(if (tNot) "#10B981" else "#0284C7"))
-            setTextColor(Color.WHITE)
-            setOnClickListener {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
-                } else {
-                    Toast.makeText(this@MainActivity, "✅ Permitido en esta versión de Android", Toast.LENGTH_SHORT).show()
-                }
+        val btnNotif = crearBotonPrimario(
+            this,
+            if (tNot) "✅ 2. Barra Guardia 24/7 y Alertas (Permitido)" else "📢 2. Permitir Notificaciones y Guardia 24/7"
+        ) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+            } else {
+                Toast.makeText(this@MainActivity, "✅ Permitido en esta versión de Android", Toast.LENGTH_SHORT).show()
             }
+        }.apply {
+            background = crearBordeRedondo(if (tNot) "#10B981" else "#0284C7", if (tNot) "#059669" else "#0284C7", 16f)
         }
         lay.addView(btnNotif)
 
-        val btnBateria = Button(this).apply {
-            text = if (tBat) "✅ 3. Segundo Plano 24/7 (Optimizado)" else "🔋 3. Optimizar Batería (Sin Restricciones)"
-            textSize = 13f
-            setBackgroundColor(Color.parseColor(if (tBat) "#10B981" else "#D97706"))
-            setTextColor(Color.WHITE)
-            setOnClickListener {
-                solicitarSinRestriccionesBateria()
-            }
+        val btnBateria = crearBotonPrimario(
+            this,
+            if (tBat) "✅ 3. Batería Sin Restricciones 24/7 (Listo)" else "🔋 3. Permitir Segundo Plano con Pantalla Apagada"
+        ) {
+            solicitarSinRestriccionesBateria()
+        }.apply {
+            background = crearBordeRedondo(if (tBat) "#10B981" else "#D97706", if (tBat) "#059669" else "#D97706", 16f)
         }
         lay.addView(btnBateria)
 
@@ -1130,13 +1204,61 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         jobSincronizador?.cancel()
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
         val cod = prefs.getString("codigo_tienda", "") ?: ""
+        val dbHelper = OfflineDatabaseHelper(this)
 
         jobSincronizador = CoroutineScope(Dispatchers.IO).launch {
             while (isActive) {
                 val hayNet = verificarConexionInternet()
-                withContext(Dispatchers.Main) { bannerSinInternet.visibility = if (hayNet) View.GONE else View.VISIBLE }
+                val pendientesOffline = dbHelper.contarPendientes()
+
+                withContext(Dispatchers.Main) {
+                    if (!hayNet) {
+                        bannerSinInternet.text = "📡 MODO SIN SEÑAL • Guardando cobros en SQLite local ($pendientesOffline pendientes de sincronizar)"
+                        bannerSinInternet.visibility = View.VISIBLE
+                    } else {
+                        bannerSinInternet.visibility = View.GONE
+                    }
+                }
 
                 if (hayNet) {
+                    // 1. Si hay cobros almacenados en SQLite durante el corte de internet, sincronizarlos a la nube ahora
+                    val listaPendientes = dbHelper.obtenerCobrosPendientes()
+                    if (listaPendientes.isNotEmpty()) {
+                        var sincronizadosAhora = 0
+                        for (item in listaPendientes) {
+                            try {
+                                val json = JSONObject().apply {
+                                    put("codigoTienda", item.codigoTienda.ifEmpty { cod })
+                                    put("nombre", if (item.nombre.contains(item.metodo)) item.nombre else "${item.nombre} (${item.metodo})")
+                                    put("monto", item.monto)
+                                    put("cajero", item.cajero)
+                                    put("fecha", item.fecha)
+                                    put("hora", item.hora)
+                                    put("timestamp", item.timestamp)
+                                }
+                                val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                                val resSync = client.newCall(Request.Builder().url(SERVIDOR_URL).post(body).build()).execute()
+                                if (resSync.isSuccessful) {
+                                    dbHelper.marcarComoSincronizado(item.idLocal)
+                                    sincronizadosAhora++
+                                }
+                                resSync.close()
+                            } catch (e: Exception) {
+                                break
+                            }
+                        }
+                        if (sincronizadosAhora > 0) {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    "☁️ $sincronizadosAhora cobro(s) guardado(s) sin señal fueron sincronizados con la nube",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
+
+                    // 2. Consultar cobros actualizados desde el servidor en la nube
                     try {
                         val url = "$SERVIDOR_URL?accion=consultar_cobros&codigoTienda=$cod&fechaFiltro=$fechaSeleccionadaFiltro"
                         val req = Request.Builder().url(url).get().build()
@@ -1169,6 +1291,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             withContext(Dispatchers.Main) { actualizarListaCaja(array) }
                         }
                     } catch (e: Exception) {}
+                } else {
+                    // 3. MODO SIN SEÑAL (OFFLINE): Mostrar en pantalla los cobros almacenados en SQLite local
+                    val localArray = dbHelper.obtenerHistorialComoJsonArray(50)
+                    withContext(Dispatchers.Main) { actualizarListaCaja(localArray) }
                 }
                 delay(2500)
             }

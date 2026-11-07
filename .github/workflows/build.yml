@@ -1,4 +1,4 @@
-name: Compilar APK
+name: Compilar APK y AAB Play Store
 
 on:
   push:
@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Descargar codigo
         uses: actions/checkout@v4
@@ -18,16 +19,38 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Generar Keystore Oficial de Firma Release (si no existe)
+        run: |
+          if [ ! -f app/yapealdia-release.jks ]; then
+            keytool -genkeypair -v \
+              -keystore app/yapealdia-release.jks \
+              -alias yapealdia \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass YapeAlDia2026 \
+              -keypass YapeAlDia2026 \
+              -dname "CN=YapeAlDia, OU=ComercioPeru, O=YapeAlDia, L=Lima, ST=Lima, C=PE"
+          fi
+
       - name: Configurar Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.5'
 
-      - name: Compilar APK
-        run: gradle assembleDebug
+      - name: Compilar APK de Pruebas y AAB Oficial para Google Play
+        run: gradle assembleDebug bundleRelease
 
-      - name: Subir APK generado
+      - name: Subir APK generado (Para probar en celular)
         uses: actions/upload-artifact@v4
         with:
           name: App-Yape-Notifier
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Subir AAB Oficial Firmado (Para subir a Google Play Console)
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlayStore-YapeAlDia-AAB
+          path: |
+            app/build/outputs/bundle/release/app-release.aab
+            app/yapealdia-release.jks

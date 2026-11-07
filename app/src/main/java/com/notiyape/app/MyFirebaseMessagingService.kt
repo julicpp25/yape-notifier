@@ -1,18 +1,54 @@
 package com.notiyape.app
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.media.AudioManager
 import android.media.RingtoneManager
+import android.media.ToneGenerator
 import android.os.Build
-import android.app.Notification
+import android.os.Bundle
+import android.os.PowerManager
+import android.speech.tts.TextToSpeech
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.util.Locale
 
-class MyFirebaseMessagingService : FirebaseMessagingService() {
+class MyFirebaseMessagingService : FirebaseMessagingService(), TextToSpeech.OnInitListener {
+
+    private var motorVozPush: TextToSpeech? = null
+    private var vozLista = false
+    private var discursoPendiente: String? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        try {
+            motorVozPush = TextToSpeech(this, this, "com.google.android.tts")
+        } catch (e: Exception) {
+            motorVozPush = TextToSpeech(this, this)
+        }
+    }
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            motorVozPush?.language = Locale("es", "PE")
+            motorVozPush?.setPitch(1.04f)
+            motorVozPush?.setSpeechRate(1.02f)
+            vozLista = true
+            discursoPendiente?.let { texto ->
+                hablarEnSegundoPlano(texto)
+                discursoPendiente = null
+            }
+        }
+    }
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
@@ -23,10 +59,51 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
 
+        // Despertar CPU del celular del Cajero aunque esté con pantalla apagada o minimizado
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "YapeAlDia::PushCajeroWakeLock")
+            wl.acquire(6000L)
+        } catch (e: Exception) {}
+
         val titulo = remoteMessage.notification?.title ?: remoteMessage.data["titulo"] ?: "🔔 YapeAlDía"
         val mensaje = remoteMessage.notification?.body ?: remoteMessage.data["mensaje"] ?: "¡Nuevo cobro recibido!"
+        val monto = remoteMessage.data["monto"] ?: ""
 
         mostrarNotificacionPush(titulo, mensaje)
+
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("voz_activa", true)) {
+            val fraseHablar = if (monto.isNotEmpty()) {
+                val mTexto = if (monto == "1" || monto == "1.00") "un sol" else "$monto soles"
+                "¡Atención caja! Llegó un cobro de $mTexto. $mensaje"
+            } else {
+                "¡Atención caja! $mensaje"
+            }
+            if (vozLista) {
+                hablarEnSegundoPlano(fraseHablar)
+            } else {
+                discursoPendiente = fraseHablar
+            }
+        }
+    }
+
+    private fun hablarEnSegundoPlano(texto: String) {
+        CoroutineScope(Dispatchers.Default).launch {
+            try {
+                val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0)
+                val tg = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
+                tg.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
+                delay(220)
+                tg.release()
+            } catch (e: Exception) {}
+
+            val params = Bundle().apply {
+                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+            }
+            motorVozPush?.speak(texto, TextToSpeech.QUEUE_FLUSH, params, "TTS_PUSH_CAJERO")
+        }
     }
 
     private fun mostrarNotificacionPush(titulo: String, mensaje: String) {
@@ -77,5 +154,11 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
             notificationManager.notify(System.currentTimeMillis().toInt(), notification)
         }
+    }
+
+    override fun onDestroy() {
+        motorVozPush?.stop()
+        motorVozPush?.shutdown()
+        super.onDestroy()
     }
 }

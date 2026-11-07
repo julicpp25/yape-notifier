@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
@@ -26,7 +27,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Receptor de Notificaciones Push de Firebase -->
+        <!-- Receptor de Notificaciones Push de Firebase (Despierta al Cajero 24/7 con Voz) -->
         <service
             android:name=".MyFirebaseMessagingService"
             android:exported="false">
@@ -35,10 +36,11 @@
             </intent-filter>
         </service>
 
-        <!-- Lector de Notificaciones de Yape/Plin (Requiere Declaración de Special App Access en Play Console) -->
+        <!-- Lector de Notificaciones 24/7 con Escudo Foreground Service y WakeLock -->
         <service
             android:name=".YapeListenerService"
             android:label="Lector de Pagos YapeAlDía"
+            android:foregroundServiceType="dataSync"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
             android:exported="true">
             <intent-filter>
