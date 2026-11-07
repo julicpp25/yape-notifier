@@ -1,0 +1,6 @@
+{
+  "name": "NotiCobros - Alertas Yape & Plin",
+  "description": "Asistente inteligente de cobros por voz para Yape y Plin. Simulador, validador de notificaciones y centro de publicación en Google Play Store.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
