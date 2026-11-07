@@ -432,9 +432,10 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         val montoEsperado = montoEsperadoStr.toDoubleOrNull() ?: 0.0
         val cajeroOrdenEsperada = prefs.getString("cajero_orden_pos", "") ?: ""
 
-        // Anuncio en voz alta con timbre previo y verificación de monto completo
+        // Anuncio en voz alta con timbre previo, nombre del cliente y verificación de monto completo
+        val decirNombre = prefs.getBoolean("decir_nombre_voz", true)
         if (prefs.getBoolean("voz_activa", true)) {
-            reproducirTimbreYVoz(metodo, monto, montoDouble, montoEsperado)
+            reproducirTimbreYVoz(metodo, monto, remitente, decirNombre, montoDouble, montoEsperado)
         }
 
         // Si se cubrió el monto esperado en el POS, limpiamos la orden pendiente
@@ -450,6 +451,11 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
 
         val horaActual = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(nowMs))
         val fechaHoy = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(nowMs))
+
+        // Guardar resumen del último cobro para el botón "🔊 Repetir Último"
+        prefs.edit()
+            .putString("ultimo_cobro_resumen", "$remitente|$monto|$metodo|$horaActual")
+            .apply()
 
         // 1. RESPALDO OFFLINE INMEDIATO EN SQLITE LOCAL (Nunca se pierde aunque no haya señal)
         val dbHelper = OfflineDatabaseHelper(this)
@@ -525,29 +531,45 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
     private fun reproducirTimbreYVoz(
         metodo: String,
         monto: String,
+        remitente: String = "Cliente",
+        decirNombre: Boolean = true,
         montoRecibido: Double = 0.0,
         montoEsperado: Double = 0.0
     ) {
+        val esPagoIncompleto = montoEsperado > 0.0 && montoRecibido > 0.0 && montoRecibido < (montoEsperado - 0.01)
         CoroutineScope(Dispatchers.Default).launch {
             try {
                 val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
                 val toneG = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
-                toneG.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
-                delay(220)
+                if (esPagoIncompleto) {
+                    // Alerta sonora grave de 3 toques para advertir pago incompleto en ambientes ruidosos
+                    repeat(3) {
+                        toneG.startTone(ToneGenerator.TONE_SUP_ERROR, 190)
+                        delay(240)
+                    }
+                } else {
+                    toneG.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
+                    delay(220)
+                }
                 toneG.release()
             } catch (e: Exception) {}
 
             if (vozLista && motorVoz != null) {
                 val fraseMonto = if (monto == "1" || monto == "1.00") "un sol" else "$monto soles"
-                val discurso = if (montoEsperado > 0.0 && montoRecibido > 0.0 && montoRecibido < (montoEsperado - 0.01)) {
+                val fraseCliente = if (decirNombre && remitente.isNotBlank() && !remitente.equals("Cliente", ignoreCase = true)) {
+                    " de $remitente"
+                } else {
+                    ""
+                }
+                val discurso = if (esPagoIncompleto) {
                     val faltante = String.format(Locale.US, "%.2f", montoEsperado - montoRecibido).removeSuffix(".00")
                     val esperadoTxt = String.format(Locale.US, "%.2f", montoEsperado).removeSuffix(".00")
-                    "¡Atención caja! Se recibió un $metodo de $fraseMonto, pero el cobro en pantalla era de $esperadoTxt soles. ¡Faltan $faltante soles!"
+                    "¡Atención caja! Se recibió un $metodo de $fraseMonto$fraseCliente, pero el cobro en pantalla era de $esperadoTxt soles. ¡Faltan $faltante soles!"
                 } else {
                     val animo = frasesMotivadoras.random()
-                    "¡Te llegó un $metodo de $fraseMonto! $animo"
+                    "¡Te llegó un $metodo de $fraseMonto$fraseCliente! $animo"
                 }
                 val params = Bundle().apply {
                     putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)

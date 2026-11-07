@@ -98,6 +98,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var txtMontoQrPOS: TextView
     private lateinit var switchVozCaja: Switch
     private lateinit var txtTotalHoyCaja: TextView
+    private lateinit var txtDesgloseYapePlin: TextView
+    private lateinit var txtEstadoReceptorDueno: TextView
+    private lateinit var inBuscarCobroCaja: EditText
     private lateinit var btnOcultarSaldo: Button
     private lateinit var layoutListaCobrosCaja: LinearLayout
     private var ultimoIdCobroConocido = -1
@@ -109,7 +112,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var horaInicioTurnoStr = ""
     private var saldoOculto = false
     private var totalVentasFiltradas = 0.0
+    private var totalYapeFiltrado = 0.0
+    private var totalPlinFiltrado = 0.0
     private var cantidadVentasFiltradas = 0
+    private var ultimoArrayCobrosCache = JSONArray()
     private var fechaSeleccionadaFiltro = ""
     private var esModoOscuro = false
 
@@ -494,7 +500,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         rowF.addView(btnFiltroHoy); rowF.addView(btnFiltroAyer); rowF.addView(btnFiltroCalendario)
         cardFiltroFechas.addView(txtTituloPeriodo); cardFiltroFechas.addView(rowF)
 
-        // Tarjeta Total
+        // Indicador Anti-Estafa (Latido del Celular del Dueño en Línea)
+        txtEstadoReceptorDueno = TextView(this).apply {
+            text = "🟢 Escudo Anti-Yape Falso Activo • Verificando línea en tiempo real..."
+            textSize = 11.5f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#065F46"))
+            background = crearBordeRedondo(if (esModoOscuro) "#064E3B" else "#ECFDF5", "#10B981", 14f)
+            setPadding(16, 10, 16, 10)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, 0, 0, 10)
+            }
+        }
+
+        // Tarjeta Total con Desglose Yape vs Plin
         val cardTotal = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = crearBordeRedondo("#F3E8F7", "#D8B4E2", 20f)
@@ -508,7 +527,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val btnRefresh = Button(this).apply { text = "🔄"; textSize = 14f; background = crearBordeRedondo("#FFFFFF", "#D8B4E2", 12f); setPadding(10, 6, 10, 6); setOnClickListener { consultarCobrosServidorUnaVez() } }
         rowTH.addView(lblT); rowTH.addView(btnOcultarSaldo); rowTH.addView(btnRefresh)
         txtTotalHoyCaja = TextView(this).apply { text = "S/ 0.00"; textSize = 32f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)); setPadding(0, 4, 0, 0) }
-        cardTotal.addView(rowTH); cardTotal.addView(txtTotalHoyCaja)
+        txtDesgloseYapePlin = TextView(this).apply {
+            text = "💜 Yape: S/ 0.00   |   🩵 Plin: S/ 0.00   |   📋 0 cobros"
+            textSize = 12f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#475569"))
+            setPadding(0, 6, 0, 0)
+        }
+        cardTotal.addView(rowTH); cardTotal.addView(txtTotalHoyCaja); cardTotal.addView(txtDesgloseYapePlin)
 
         // POS Táctil con Montos Rápidos
         val cardPOS = crearTarjetaFintech(this)
@@ -565,15 +591,52 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         cardPOS.addView(txtMontoDisplayPOS); cardPOS.addView(layTeclado); cardPOS.addView(btnGenQr); cardPOS.addView(imgQrPOS); cardPOS.addView(txtMontoQrPOS)
 
-        // Historial
+        // Historial con Buscador Rápido y Botón "🔊 Repetir Último"
         val cardHist = crearTarjetaFintech(this)
+        val filaCabeceraHist = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, 8)
+        }
+        val txtTitCobrosVivo = TextView(this).apply {
+            text = "📋 Cobros en Vivo:"
+            textSize = 15f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A"))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val btnRepetirUltimo = Button(this).apply {
+            text = "🔊 Repetir Último"
+            textSize = 11f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor(COLOR_PRIMARY))
+            background = crearBordeRedondo("#F3E8F7", "#D8B4E2", 12f)
+            setPadding(16, 8, 16, 8)
+            setOnClickListener { repetirUltimoCobroPorVoz() }
+        }
+        filaCabeceraHist.addView(txtTitCobrosVivo)
+        filaCabeceraHist.addView(btnRepetirUltimo)
+
+        inBuscarCobroCaja = crearInputFintech(this, "🔍 Buscar cliente, monto u hora...").apply {
+            textSize = 13f
+            setPadding(20, 12, 20, 12)
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    actualizarListaCaja(ultimoArrayCobrosCache)
+                }
+                override fun afterTextChanged(s: android.text.Editable?) {}
+            })
+        }
+
         layoutListaCobrosCaja = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        cardHist.addView(TextView(this).apply { text = "📋 Cobros en Vivo:"; textSize = 15f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A")) })
+        cardHist.addView(filaCabeceraHist)
+        cardHist.addView(inBuscarCobroCaja)
         cardHist.addView(layoutListaCobrosCaja)
         cardHist.addView(crearBotonSecundario(this, "📲 Enviar Cuadre por WhatsApp") { enviarCuadrePorWhatsApp() })
         cardHist.addView(crearBotonSecundario(this, "📊 Descargar mi Excel (Google Sheets)") { descargarOesAbrirGoogleSheet() })
 
-        tabCajaPOS.addView(barraSubCaja); tabCajaPOS.addView(cardFiltroFechas); tabCajaPOS.addView(cardTotal); tabCajaPOS.addView(cardPOS); tabCajaPOS.addView(cardHist)
+        tabCajaPOS.addView(barraSubCaja); tabCajaPOS.addView(txtEstadoReceptorDueno); tabCajaPOS.addView(cardFiltroFechas); tabCajaPOS.addView(cardTotal); tabCajaPOS.addView(cardPOS); tabCajaPOS.addView(cardHist)
 
         // TAB 2: CAJEROS
         tabCajeros = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
@@ -679,6 +742,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val u = prefs.getString("sheet_url_cliente", "") ?: ""
             if (u.isNotEmpty()) startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)))
         }
+        val switchDecirNombreVoz = Switch(this).apply {
+            text = "🗣️ Decir nombre del cliente que pagó por voz"
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A"))
+            isChecked = prefs.getBoolean("decir_nombre_voz", true)
+            setPadding(12, 14, 12, 14)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("decir_nombre_voz", isChecked).apply()
+            }
+        }
         val btnTestSound = crearBotonSecundario(this, "🔊 Probar Sonido de Caja") { probarAudioCaja() }
         val btnWspHelp = crearBotonSecundario(this, "💬 Soporte por WhatsApp") {
             val cod = prefs.getString("codigo_tienda", ""); val nom = prefs.getString("nombre_tienda", "")
@@ -692,7 +766,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setOnClickListener { jobSincronizador?.cancel(); prefs.edit().putBoolean("cajero_logueado", false).apply(); mostrarSeccion(layoutPortada) }
         }
         cardCfg.addView(TextView(this).apply { text = "ESTADO DEL SISTEMA"; textSize = 15f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
-        cardCfg.addView(rowBdg); cardCfg.addView(btnModoOscuroAjustes); cardCfg.addView(btnPinD); cardCfg.addView(btnSheet); cardCfg.addView(btnTestSound); cardCfg.addView(btnWspHelp); cardCfg.addView(btnPolitica); cardCfg.addView(btnLogout)
+        cardCfg.addView(rowBdg); cardCfg.addView(switchDecirNombreVoz); cardCfg.addView(btnModoOscuroAjustes); cardCfg.addView(btnPinD); cardCfg.addView(btnSheet); cardCfg.addView(btnTestSound); cardCfg.addView(btnWspHelp); cardCfg.addView(btnPolitica); cardCfg.addView(btnLogout)
         tabConfiguracion.addView(cardCfg)
 
         containerTabs.addView(tabCajaPOS); containerTabs.addView(tabCajeros); containerTabs.addView(tabConfiguracion)
@@ -948,6 +1022,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun actualizarVistaSaldo() {
         txtTotalHoyCaja.text = if (saldoOculto) "S/ ••••••" else String.format(Locale.US, "S/ %.2f", totalVentasFiltradas)
+        txtDesgloseYapePlin.text = if (saldoOculto) {
+            "💜 Yape: S/ ••••   |   🩵 Plin: S/ ••••   |   📋 $cantidadVentasFiltradas cobros"
+        } else {
+            String.format(
+                Locale.US,
+                "💜 Yape: S/ %.2f   |   🩵 Plin: S/ %.2f   |   📋 %d cobros",
+                totalYapeFiltrado,
+                totalPlinFiltrado,
+                cantidadVentasFiltradas
+            )
+        }
         btnOcultarSaldo.text = if (saldoOculto) "👁️‍🗨️" else "👁️"
     }
 
@@ -1450,12 +1535,23 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         }
 
                         val array = if (jsonStr.trim().startsWith("[")) JSONArray(jsonStr) else JSONArray()
+                        val horaLatido = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+
+                        withContext(Dispatchers.Main) {
+                            txtEstadoReceptorDueno.text = if (esSesionDueño) {
+                                "🟢 Receptor Principal Activo ($horaLatido) • Anti-Yape Falso Protegido"
+                            } else {
+                                "🟢 Celular del Dueño en Línea ($horaLatido) • Si no suena aquí, el Yape NO entró"
+                            }
+                            txtEstadoReceptorDueno.setTextColor(Color.parseColor("#065F46"))
+                        }
 
                         if (array.length() > 0) {
                             val ultimoCobro = array.getJSONObject(0)
                             val idCobro = ultimoCobro.optInt("id", -1)
                             val monto = ultimoCobro.optString("monto", "0.00")
                             val nombre = ultimoCobro.optString("nombre", "Cliente")
+                            val horaCobro = ultimoCobro.optString("hora", "")
 
                             // Si el registro indica cambio de token de sesión para este cajero, expulsar sesión duplicada
                             val tokenServidorCajero = ultimoCobro.optString("sesionTokenCajero", "")
@@ -1482,11 +1578,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                                 val montoRecibidoDouble = monto.replace(",", ".").toDoubleOrNull() ?: 0.0
                                 val montoEsperadoStr = prefs.getString("monto_esperado_pos", "") ?: ""
                                 val montoEsperadoDouble = montoEsperadoStr.toDoubleOrNull() ?: 0.0
+                                val decirNombre = prefs.getBoolean("decir_nombre_voz", true)
+
+                                prefs.edit()
+                                    .putString("ultimo_cobro_resumen", "$nombre|$monto|Cobro|$horaCobro")
+                                    .apply()
 
                                 withContext(Dispatchers.Main) {
                                     // Solo cantamos desde el sincronizador si este cobro NO fue cantado ya por el lector local de este mismo teléfono
                                     if (!yaFueCantadoEnEsteCelular && prefs.getBoolean("voz_activa", true) && vozLista) {
-                                        reproducirTimbreYVozLocal(monto, montoRecibidoDouble, montoEsperadoDouble)
+                                        reproducirTimbreYVozLocal(
+                                            monto = monto,
+                                            nombreCliente = nombre,
+                                            decirNombre = decirNombre,
+                                            montoRecibido = montoRecibidoDouble,
+                                            montoEsperado = montoEsperadoDouble
+                                        )
                                     }
 
                                     if (montoEsperadoDouble > 0.0 && montoRecibidoDouble > 0.0 && montoRecibidoDouble < (montoEsperadoDouble - 0.01)) {
@@ -1517,35 +1624,102 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 } else {
                     // 3. MODO SIN SEÑAL (OFFLINE): Mostrar en pantalla los cobros almacenados en SQLite local
                     val localArray = dbHelper.obtenerHistorialComoJsonArray(50)
-                    withContext(Dispatchers.Main) { actualizarListaCaja(localArray) }
+                    withContext(Dispatchers.Main) {
+                        txtEstadoReceptorDueno.text = "📡 Modo Offline SQLite • Guardando y mostrando cobros locales"
+                        txtEstadoReceptorDueno.setTextColor(Color.parseColor("#92400E"))
+                        actualizarListaCaja(localArray)
+                    }
                 }
-                delay(2500)
+                // MODO TURBO INTELIGENTE: 2 seg cuando hay QR esperando pago en pantalla, 7.5 seg en reposo (ahorra 75% de cuota y batería)
+                val esperandoCobroActivo = (prefs.getString("monto_esperado_pos", "") ?: "").isNotEmpty()
+                delay(if (esperandoCobroActivo) 2000L else 7500L)
             }
         }
     }
 
     private fun reproducirTimbreYVozLocal(
         monto: String,
+        nombreCliente: String = "Cliente",
+        decirNombre: Boolean = true,
         montoRecibido: Double = 0.0,
         montoEsperado: Double = 0.0
     ) {
+        val esPagoIncompleto = montoEsperado > 0.0 && montoRecibido > 0.0 && montoRecibido < (montoEsperado - 0.01)
         CoroutineScope(Dispatchers.Default).launch {
             try {
                 val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0)
                 val tg = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
-                tg.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
-                delay(220); tg.release()
+                if (esPagoIncompleto) {
+                    repeat(3) {
+                        tg.startTone(ToneGenerator.TONE_SUP_ERROR, 190)
+                        delay(240)
+                    }
+                } else {
+                    tg.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
+                    delay(220)
+                }
+                tg.release()
             } catch (e: Exception) {}
             val frase = if (monto == "1" || monto == "1.00") "un sol" else "$monto soles"
-            val mensajeVoz = if (montoEsperado > 0.0 && montoRecibido > 0.0 && montoRecibido < (montoEsperado - 0.01)) {
+            val nombreLimpio = nombreCliente.replace(Regex("""\s*\(.*?\)\s*"""), "").trim()
+            val fraseCliente = if (decirNombre && nombreLimpio.isNotEmpty() && !nombreLimpio.equals("Cliente", ignoreCase = true)) {
+                " de $nombreLimpio"
+            } else {
+                ""
+            }
+            val mensajeVoz = if (esPagoIncompleto) {
                 val faltante = String.format(Locale.US, "%.2f", montoEsperado - montoRecibido).removeSuffix(".00")
                 val esperadoTxt = String.format(Locale.US, "%.2f", montoEsperado).removeSuffix(".00")
-                "¡Atención caja! Se recibió $frase, pero el cobro era de $esperadoTxt soles. ¡Faltan $faltante soles!"
+                "¡Atención caja! Se recibió $frase$fraseCliente, pero el cobro era de $esperadoTxt soles. ¡Faltan $faltante soles!"
             } else {
-                "¡Te llegó un cobro de $frase! ¡A seguir sumando!"
+                "¡Te llegó un cobro de $frase$fraseCliente! ¡A seguir sumando!"
             }
             motorVozCajero?.speak(mensajeVoz, TextToSpeech.QUEUE_FLUSH, null, "TTS_CAJA")
+        }
+    }
+
+    private fun repetirUltimoCobroPorVoz() {
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        val resumen = prefs.getString("ultimo_cobro_resumen", "") ?: ""
+        var nombre = ""
+        var monto = ""
+        var hora = ""
+
+        if (resumen.isNotEmpty() && resumen.contains("|")) {
+            val partes = resumen.split("|")
+            nombre = partes.getOrNull(0) ?: "Cliente"
+            monto = partes.getOrNull(1) ?: "0.00"
+            hora = partes.getOrNull(3) ?: ""
+        } else if (ultimoArrayCobrosCache.length() > 0) {
+            val ult = ultimoArrayCobrosCache.getJSONObject(0)
+            nombre = ult.optString("nombre", "Cliente")
+            monto = ult.optString("monto", "0.00")
+            hora = ult.optString("hora", "")
+        }
+
+        if (monto.isEmpty()) {
+            Toast.makeText(this, "Aún no hay cobros registrados para repetir", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val nombreLimpio = nombre.replace(Regex("""\s*\(.*?\)\s*"""), "").trim()
+        val textoRepetir = "Último cobro registrado: $monto soles de $nombreLimpio" +
+            if (hora.isNotEmpty()) " a las $hora." else "."
+
+        Toast.makeText(this, "🔊 $textoRepetir", Toast.LENGTH_LONG).show()
+        CoroutineScope(Dispatchers.Default).launch {
+            try {
+                val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0)
+                val tg = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
+                tg.startTone(ToneGenerator.TONE_PROP_BEEP2, 160)
+                delay(200)
+                tg.release()
+            } catch (e: Exception) {}
+            if (vozLista && motorVozCajero != null) {
+                motorVozCajero?.speak(textoRepetir, TextToSpeech.QUEUE_FLUSH, null, "TTS_REPETIR_ULTIMO")
+            }
         }
     }
 
@@ -1564,18 +1738,29 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun actualizarListaCaja(array: JSONArray) {
+        ultimoArrayCobrosCache = array
         layoutListaCobrosCaja.removeAllViews()
         var suma = 0.0
+        var sumaYape = 0.0
+        var sumaPlin = 0.0
         var conteo = 0
         val fechaHoy = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
 
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
         val miCajeroActivo = (prefs.getString("cajero_activo", "") ?: "").trim()
+        val textoBusqueda = if (::inBuscarCobroCaja.isInitialized) {
+            inBuscarCobroCaja.text.toString().trim().lowercase(Locale.ROOT)
+        } else {
+            ""
+        }
 
-        for (i in 0 until minOf(array.length(), 25)) {
+        for (i in 0 until minOf(array.length(), 40)) {
             val item = array.getJSONObject(i)
             val mStr = item.optString("monto", "0.00")
             val fStr = item.optString("fecha", "")
+            val hStr = item.optString("hora", "")
+            val nomStr = item.optString("nombre", "Cliente")
+            val metStr = item.optString("metodo", "")
             val tsItem = item.optLong("timestamp", 0L)
             val cajeroItem = item.optString("cajero", "").trim()
 
@@ -1594,8 +1779,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 else if (fechaSeleccionadaFiltro.isEmpty() && fStr != fechaHoy) continue
             }
 
+            if (textoBusqueda.isNotEmpty()) {
+                val coincide = nomStr.lowercase(Locale.ROOT).contains(textoBusqueda) ||
+                    mStr.lowercase(Locale.ROOT).contains(textoBusqueda) ||
+                    hStr.lowercase(Locale.ROOT).contains(textoBusqueda) ||
+                    cajeroItem.lowercase(Locale.ROOT).contains(textoBusqueda)
+                if (!coincide) continue
+            }
+
             val montoLimpio = mStr.replace(",", ".").toDoubleOrNull() ?: 0.0
             suma += montoLimpio
+            if (nomStr.contains("Plin", ignoreCase = true) || metStr.contains("Plin", ignoreCase = true)) {
+                sumaPlin += montoLimpio
+            } else {
+                sumaYape += montoLimpio
+            }
             conteo++
 
             val row = LinearLayout(this).apply {
@@ -1607,7 +1805,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
             val etiqCajero = if (cajeroItem.isNotEmpty()) " • 👤 $cajeroItem" else ""
             row.addView(TextView(this).apply {
-                text = "${item.optString("nombre")} (${item.optString("hora")}$etiqCajero)"
+                text = "$nomStr ($hStr$etiqCajero)"
                 textSize = 14f; setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A"))
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -1620,6 +1818,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             layoutListaCobrosCaja.addView(row)
         }
         totalVentasFiltradas = suma
+        totalYapeFiltrado = sumaYape
+        totalPlinFiltrado = sumaPlin
         cantidadVentasFiltradas = conteo
         actualizarVistaSaldo()
     }
