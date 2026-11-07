@@ -859,18 +859,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun mostrarDivulgacionProminenteNotificaciones() {
         AlertDialog.Builder(this)
             .setTitle("Divulgación de Privacidad y Notificaciones 🔔")
-            .setMessage(
-                "NotiCobros requiere acceso a las notificaciones del sistema con el único propósito de detectar automáticamente los cobros recibidos de Yape, Plin y bancos.
-
-" +
-                "• NO lee ni recopila mensajes privados, chats de WhatsApp, SMS ni notificaciones personales.
-" +
-                "• NO tiene acceso a contraseñas bancarias, saldo de cuentas ni datos financieros sensibles.
-" +
-                "• La información de pagos se usa exclusivamente para anunciar el cobro por altavoz a tus cajeros y registrarlo en tu caja.
-" +
-                "• Ningún dato se comercializa ni se comparte con terceros."
-            )
+            .setMessage("NotiCobros requiere acceso a las notificaciones para detectar cobros de Yape y Plin.\n\n• NO lee mensajes privados ni WhatsApp.\n• NO accede a claves ni saldos bancarios.\n• Solo anuncia el cobro por altavoz.\n• Ningún dato se comercializa.")
             .setPositiveButton("Aceptar y Configurar") { _, _ ->
                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
