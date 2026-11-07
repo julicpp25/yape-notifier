@@ -856,6 +856,28 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         dpd.show()
     }
 
+    private fun mostrarDivulgacionProminenteNotificaciones() {
+        AlertDialog.Builder(this)
+            .setTitle("Divulgación de Privacidad y Notificaciones 🔔")
+            .setMessage(
+                "NotiCobros requiere acceso a las notificaciones del sistema con el único propósito de detectar automáticamente los cobros recibidos de Yape, Plin y bancos.
+
+" +
+                "• NO lee ni recopila mensajes privados, chats de WhatsApp, SMS ni notificaciones personales.
+" +
+                "• NO tiene acceso a contraseñas bancarias, saldo de cuentas ni datos financieros sensibles.
+" +
+                "• La información de pagos se usa exclusivamente para anunciar el cobro por altavoz a tus cajeros y registrarlo en tu caja.
+" +
+                "• Ningún dato se comercializa ni se comparte con terceros."
+            )
+            .setPositiveButton("Aceptar y Configurar") { _, _ ->
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
     private fun mostrarDialogoAjustesRestringidos() {
         AlertDialog.Builder(this).setTitle("Desbloquear Ajuste Restringido 🛡️")
             .setMessage("1. Toca 'Ir a Ajustes'.\n2. Toca los 3 puntos arriba (⋮).\n3. Selecciona 'Permitir ajustes restringidos' e introduce tu PIN/huella.\n\nRegresa y activa el lector normalmente.")
