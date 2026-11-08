@@ -92,8 +92,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     // POS & CAJA
     private lateinit var txtInfoCajero: TextView
-    private lateinit var txtMontoDisplayPOS: TextView
-    private var montoTecladoPOS: String = ""
     private lateinit var imgQrPOS: ImageView
     private lateinit var txtMontoQrPOS: TextView
     private lateinit var switchVozCaja: Switch
@@ -536,60 +534,54 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         cardTotal.addView(rowTH); cardTotal.addView(txtTotalHoyCaja); cardTotal.addView(txtDesgloseYapePlin)
 
-        // POS Táctil con Montos Rápidos
+        // Visor Limpio de Código QR Oficial de Mostrador (Sin teclado de monto falso)
         val cardPOS = crearTarjetaFintech(this)
-        txtMontoDisplayPOS = TextView(this).apply { text = "S/ 0.00"; textSize = 38f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)); gravity = Gravity.CENTER; setPadding(0, 8, 0, 8) }
-        val filaMontosRapidos = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+        val txtTituloQrMostrador = TextView(this).apply {
+            text = "📱 Código QR Oficial de Mostrador"
+            textSize = 15f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor(COLOR_PRIMARY))
             gravity = Gravity.CENTER
-            setPadding(0, 4, 0, 10)
+            setPadding(0, 2, 0, 8)
         }
-        listOf("5", "10", "20", "50").forEach { mRapido ->
-            val btnR = Button(this).apply {
-                text = "S/ $mRapido"
-                textSize = 12f
-                setTypeface(null, Typeface.BOLD)
-                setTextColor(Color.parseColor(COLOR_PRIMARY))
-                background = crearBordeRedondo("#F3E8F7", "#D8B4E2", 14f)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(4, 0, 4, 0) }
-                setOnClickListener {
-                    montoTecladoPOS = mRapido
-                    txtMontoDisplayPOS.text = "S/ $mRapido.00"
-                }
+        imgQrPOS = ImageView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(480, 480).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                setMargins(0, 10, 0, 10)
             }
-            filaMontosRapidos.addView(btnR)
+            visibility = View.GONE
         }
-        val layTeclado = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        layTeclado.addView(filaMontosRapidos)
-        layTeclado.addView(crearFilaTeclado("1", "2", "3"))
-        layTeclado.addView(crearFilaTeclado("4", "5", "6"))
-        layTeclado.addView(crearFilaTeclado("7", "8", "9"))
-        layTeclado.addView(crearFilaTeclado("C", "0", "⌫"))
-        imgQrPOS = ImageView(this).apply { layoutParams = LinearLayout.LayoutParams(420, 420).apply { gravity = Gravity.CENTER_HORIZONTAL; setMargins(0, 8, 0, 8) }; visibility = View.GONE }
-        txtMontoQrPOS = TextView(this).apply { textSize = 18f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)); gravity = Gravity.CENTER; visibility = View.GONE }
-        val btnGenQr = crearBotonPrimario(this, "⚡ MOSTRAR QR DE COBRO") {
-            val mVal = montoTecladoPOS.toDoubleOrNull() ?: 0.0
-            if (mVal <= 0.0) { Toast.makeText(this, "Ingresa un monto mayor a S/ 0.00", Toast.LENGTH_SHORT).show(); return@crearBotonPrimario }
+        txtMontoQrPOS = TextView(this).apply {
+            textSize = 14f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor(COLOR_PRIMARY))
+            gravity = Gravity.CENTER
+            visibility = View.GONE
+        }
+        val btnGenQr = crearBotonPrimario(this, "📱 MOSTRAR MI QR DE YAPE") {}
+        btnGenQr.setOnClickListener {
+            if (imgQrPOS.visibility == View.VISIBLE) {
+                imgQrPOS.visibility = View.GONE
+                txtMontoQrPOS.visibility = View.GONE
+                btnGenQr.text = "📱 MOSTRAR MI QR DE YAPE"
+                return@setOnClickListener
+            }
             val qBase = prefs.getString("qr_base_yape", "") ?: ""
-            if (qBase.isEmpty()) { Toast.makeText(this, "Configura tu QR en la pestaña Cajeros", Toast.LENGTH_LONG).show(); return@crearBotonPrimario }
-
-            val montoFormateado = String.format(Locale.US, "%.2f", mVal)
-            val cajeroResp = if (esSesionDueño) "Dueño" else (prefs.getString("cajero_activo", "Cajero") ?: "Cajero")
-            prefs.edit()
-                .putString("monto_esperado_pos", montoFormateado)
-                .putString("cajero_orden_pos", cajeroResp)
-                .apply()
-
-            val qrDinamicoEMV = inyectarMontoEMVCoConCRC16(qBase, mVal)
-            val bmp = generarBitmapQr(qrDinamicoEMV, 420, 420)
+            if (qBase.isEmpty()) {
+                Toast.makeText(this, "Primero sube la imagen de tu QR en la pestaña Cajeros", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            val bmp = generarBitmapQr(qBase, 480, 480)
             if (bmp != null) {
-                imgQrPOS.setImageBitmap(bmp); imgQrPOS.visibility = View.VISIBLE
-                txtMontoQrPOS.text = "📲 Escanea y paga: S/ $montoFormateado\n🔊 Verificador activo: avisará por voz si pagan menos"
-                txtMontoQrPOS.textSize = 15f
+                val nomTienda = prefs.getString("nombre_tienda", "Mi Negocio") ?: "Mi Negocio"
+                imgQrPOS.setImageBitmap(bmp)
+                imgQrPOS.visibility = View.VISIBLE
+                txtMontoQrPOS.text = "🏪 $nomTienda\n📲 Escanea con Yape o Plin y digita el monto en tu celular"
                 txtMontoQrPOS.visibility = View.VISIBLE
+                btnGenQr.text = "🙈 OCULTAR QR DE MOSTRADOR"
             }
         }
-        cardPOS.addView(txtMontoDisplayPOS); cardPOS.addView(layTeclado); cardPOS.addView(btnGenQr); cardPOS.addView(imgQrPOS); cardPOS.addView(txtMontoQrPOS)
+        cardPOS.addView(txtTituloQrMostrador); cardPOS.addView(btnGenQr); cardPOS.addView(imgQrPOS); cardPOS.addView(txtMontoQrPOS)
 
         // Historial con Buscador Rápido y Botón "🔊 Repetir Último"
         val cardHist = crearTarjetaFintech(this)
@@ -813,51 +805,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             entrarDirectoAlSistema()
         } else {
             mostrarSeccion(layoutPortada)
-        }
-    }
-
-    private fun crearFilaTeclado(b1: String, b2: String, b3: String): LinearLayout {
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            weightSum = 3f
-            setPadding(0, 3, 0, 3)
-            addView(crearBotonTeclado(b1))
-            addView(crearBotonTeclado(b2))
-            addView(crearBotonTeclado(b3))
-        }
-    }
-
-    private fun crearBotonTeclado(tecla: String): Button {
-        return Button(this).apply {
-            text = tecla
-            textSize = 20f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A"))
-            background = crearBordeRedondo(if (esModoOscuro) "#334155" else "#F1F5F9", "#CBD5E1", 14f)
-            layoutParams = LinearLayout.LayoutParams(0, 110, 1f).apply { setMargins(4, 4, 4, 4) }
-            setOnClickListener {
-                when (tecla) {
-                    "C" -> {
-                        montoTecladoPOS = ""
-                        getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
-                            .edit().remove("monto_esperado_pos").remove("cajero_orden_pos").apply()
-                        imgQrPOS.visibility = View.GONE
-                        txtMontoQrPOS.visibility = View.GONE
-                    }
-                    "⌫" -> {
-                        if (montoTecladoPOS.isNotEmpty()) {
-                            montoTecladoPOS = montoTecladoPOS.substring(0, montoTecladoPOS.length - 1)
-                        }
-                    }
-                    else -> {
-                        if (montoTecladoPOS.length < 7) {
-                            montoTecladoPOS += tecla
-                        }
-                    }
-                }
-                val mVal = montoTecladoPOS.toDoubleOrNull() ?: 0.0
-                txtMontoDisplayPOS.text = if (montoTecladoPOS.isEmpty()) "S/ 0.00" else String.format(Locale.US, "S/ %.2f", mVal)
-            }
         }
     }
 
@@ -1472,12 +1419,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
 
                 if (hayNet) {
-                    // 1. Si hay cobros almacenados en SQLite durante el corte de internet, sincronizarlos a la nube ahora
+                    // 1. Si hay cobros almacenados en SQLite durante el corte de internet (>25 seg de antigüedad), sincronizarlos
                     val listaPendientes = dbHelper.obtenerCobrosPendientes()
                     if (listaPendientes.isNotEmpty()) {
                         var sincronizadosAhora = 0
                         for (item in listaPendientes) {
                             try {
+                                // Marcar como sincronizado ANTES de enviar para evitar doble subida
+                                dbHelper.marcarComoSincronizado(item.idLocal)
                                 val json = JSONObject().apply {
                                     put("codigoTienda", item.codigoTienda.ifEmpty { cod })
                                     put("nombre", if (item.nombre.contains(item.metodo)) item.nombre else "${item.nombre} (${item.metodo})")
@@ -1490,11 +1439,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                                 val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
                                 val resSync = client.newCall(Request.Builder().url(SERVIDOR_URL).post(body).build()).execute()
                                 if (resSync.isSuccessful) {
-                                    dbHelper.marcarComoSincronizado(item.idLocal)
                                     sincronizadosAhora++
+                                } else {
+                                    dbHelper.marcarComoPendiente(item.idLocal)
                                 }
                                 resSync.close()
                             } catch (e: Exception) {
+                                dbHelper.marcarComoPendiente(item.idLocal)
                                 break
                             }
                         }
@@ -1572,50 +1523,38 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                                 ultimoIdCobroConocido = idCobro
                             } else if (idCobro > ultimoIdCobroConocido) {
                                 ultimoIdCobroConocido = idCobro
+                                val nowSincMs = System.currentTimeMillis()
                                 val ultimoCobroLocalMs = prefs.getLong("ultimo_cobro_local_ms", 0L)
-                                val yaFueCantadoEnEsteCelular = (System.currentTimeMillis() - ultimoCobroLocalMs) < 30_000L
-
                                 val montoRecibidoDouble = monto.replace(",", ".").toDoubleOrNull() ?: 0.0
-                                val montoEsperadoStr = prefs.getString("monto_esperado_pos", "") ?: ""
-                                val montoEsperadoDouble = montoEsperadoStr.toDoubleOrNull() ?: 0.0
+                                val huellaSincActual = "${nombre.lowercase(Locale.ROOT).trim()}|${String.format(Locale.US, "%.2f", montoRecibidoDouble)}|$horaCobro"
+                                val ultimaHuellaSinc = prefs.getString("ultima_huella_sinc_vista", "") ?: ""
+                                val ultimoTsSinc = prefs.getLong("ultimo_ts_sinc_visto", 0L)
+
+                                // En el celular del Dueño (esSesionDueño == true) NUNCA canta el sincronizador porque YapeListenerService ya lo cantó.
+                                // En el celular del Cajero, si ya lo cantó por Push o si es la misma huella en los últimos 90 seg, tampoco se repite.
+                                val yaFueCantado = esSesionDueño ||
+                                    ((nowSincMs - ultimoCobroLocalMs) < 55_000L) ||
+                                    (huellaSincActual == ultimaHuellaSinc && (nowSincMs - ultimoTsSinc) < 90_000L)
+
                                 val decirNombre = prefs.getBoolean("decir_nombre_voz", true)
 
                                 prefs.edit()
+                                    .putString("ultima_huella_sinc_vista", huellaSincActual)
+                                    .putLong("ultimo_ts_sinc_visto", nowSincMs)
                                     .putString("ultimo_cobro_resumen", "$nombre|$monto|Cobro|$horaCobro")
                                     .apply()
 
                                 withContext(Dispatchers.Main) {
-                                    // Solo cantamos desde el sincronizador si este cobro NO fue cantado ya por el lector local de este mismo teléfono
-                                    if (!yaFueCantadoEnEsteCelular && prefs.getBoolean("voz_activa", true) && vozLista) {
+                                    if (!yaFueCantado && prefs.getBoolean("voz_activa", true) && vozLista) {
                                         reproducirTimbreYVozLocal(
                                             monto = monto,
                                             nombreCliente = nombre,
-                                            decirNombre = decirNombre,
-                                            montoRecibido = montoRecibidoDouble,
-                                            montoEsperado = montoEsperadoDouble
+                                            decirNombre = decirNombre
                                         )
+                                        Toast.makeText(this@MainActivity, "✅ ¡Cobro confirmado! S/ $monto de $nombre", Toast.LENGTH_LONG).show()
                                     }
-
-                                    if (montoEsperadoDouble > 0.0 && montoRecibidoDouble > 0.0 && montoRecibidoDouble < (montoEsperadoDouble - 0.01)) {
-                                        val faltante = String.format(Locale.US, "%.2f", montoEsperadoDouble - montoRecibidoDouble)
-                                        txtMontoQrPOS.text = "⚠️ Pago incompleto: llegó S/ $monto de S/ $montoEsperadoStr (Falta S/ $faltante)"
-                                        txtMontoQrPOS.setTextColor(Color.parseColor("#DC2626"))
-                                        Toast.makeText(
-                                            this@MainActivity,
-                                            "⚠️ ¡Atención! Recibido S/ $monto, pero el cobro era S/ $montoEsperadoStr. ¡Falta S/ $faltante!",
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                    } else {
-                                        prefs.edit().remove("monto_esperado_pos").remove("cajero_orden_pos").apply()
-                                        imgQrPOS.visibility = View.GONE
-                                        txtMontoQrPOS.visibility = View.GONE
-                                        txtMontoQrPOS.setTextColor(Color.parseColor(COLOR_PRIMARY))
-                                        montoTecladoPOS = ""
-                                        txtMontoDisplayPOS.text = "S/ 0.00"
-                                        if (!yaFueCantadoEnEsteCelular) {
-                                            Toast.makeText(this@MainActivity, "✅ ¡Cobro confirmado! S/ $monto de $nombre", Toast.LENGTH_LONG).show()
-                                        }
-                                    }
+                                    imgQrPOS.visibility = View.GONE
+                                    txtMontoQrPOS.visibility = View.GONE
                                 }
                             }
                             withContext(Dispatchers.Main) { actualizarListaCaja(array) }
@@ -1630,9 +1569,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         actualizarListaCaja(localArray)
                     }
                 }
-                // MODO TURBO INTELIGENTE: 2 seg cuando hay QR esperando pago en pantalla, 7.5 seg en reposo (ahorra 75% de cuota y batería)
-                val esperandoCobroActivo = (prefs.getString("monto_esperado_pos", "") ?: "").isNotEmpty()
-                delay(if (esperandoCobroActivo) 2000L else 7500L)
+                delay(4000L)
             }
         }
     }
@@ -1754,6 +1691,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             ""
         }
 
+        val huellasVistas = HashSet<String>()
+
         for (i in 0 until minOf(array.length(), 40)) {
             val item = array.getJSONObject(i)
             val mStr = item.optString("monto", "0.00")
@@ -1770,6 +1709,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 if (cajeroItem.isNotEmpty() &&
                     !cajeroItem.equals(miCajeroActivo, ignoreCase = true) &&
                     !cajeroItem.equals("Caja", ignoreCase = true) &&
+                    !cajeroItem.equals("Caja Principal", ignoreCase = true) &&
                     !cajeroItem.equals("Dueño", ignoreCase = true)
                 ) {
                     continue
@@ -1788,6 +1728,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
 
             val montoLimpio = mStr.replace(",", ".").toDoubleOrNull() ?: 0.0
+            // Filtro visual anti-duplicados: si en la hoja se grabó 2 veces el mismo cliente, monto y minuto, solo mostrar y sumar 1 vez
+            val claveDedupVisual = "${nomStr.lowercase(Locale.ROOT).trim()}|${String.format(Locale.US, "%.2f", montoLimpio)}|$hStr"
+            if (!huellasVistas.add(claveDedupVisual)) {
+                continue
+            }
             suma += montoLimpio
             if (nomStr.contains("Plin", ignoreCase = true) || metStr.contains("Plin", ignoreCase = true)) {
                 sumaPlin += montoLimpio
@@ -2023,64 +1968,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
             .setNegativeButton("Cancelar", null)
             .show()
-    }
-
-    /**
-     * Inyecta el Tag 54 (Transaction Amount) en tramas EMVCo de Yape/Plin y recalcula
-     * la firma CRC-16/CCITT-FALSE (Tag 6304) para que la app bancaria reconozca el monto.
-     */
-    private fun inyectarMontoEMVCoConCRC16(qrBase: String, monto: Double): String {
-        val limpio = qrBase.trim()
-        if (!limpio.startsWith("000201") || monto <= 0.0) {
-            return limpio
-        }
-        return try {
-            val montoStr = String.format(Locale.US, "%.2f", monto)
-            val tag54 = "54" + String.format(Locale.US, "%02d", montoStr.length) + montoStr
-
-            // Quitar el CRC final (6304XXXX) si está presente
-            val idxCrc = limpio.lastIndexOf("6304")
-            var cuerpoSinCrc = if (idxCrc != -1 && idxCrc >= limpio.length - 8) {
-                limpio.substring(0, idxCrc)
-            } else {
-                limpio
-            }
-
-            // Cambiar de QR estático (010211) a QR dinámico con monto (010212)
-            cuerpoSinCrc = cuerpoSinCrc.replaceFirst("010211", "010212")
-
-            // Remover Tag 54 previo si existiera o insertar antes de 5802PE / 5303604
-            val idxPais = cuerpoSinCrc.indexOf("5802PE")
-            val nuevoCuerpo = if (idxPais != -1) {
-                cuerpoSinCrc.substring(0, idxPais) + tag54 + cuerpoSinCrc.substring(idxPais)
-            } else {
-                cuerpoSinCrc + tag54
-            }
-
-            val tramaParaCrc = nuevoCuerpo + "6304"
-            val crcHex = calcularCRC16CCITT(tramaParaCrc)
-            tramaParaCrc + crcHex
-        } catch (e: Exception) {
-            limpio
-        }
-    }
-
-    private fun calcularCRC16CCITT(texto: String): String {
-        var crc = 0xFFFF
-        val polynomial = 0x1021
-        val bytes = texto.toByteArray(Charsets.UTF_8)
-        for (b in bytes) {
-            for (i in 0..7) {
-                val bit = ((b.toInt() shr (7 - i)) and 1) == 1
-                val c15 = ((crc shr 15) and 1) == 1
-                crc = crc shl 1
-                if (c15 xor bit) {
-                    crc = crc xor polynomial
-                }
-            }
-        }
-        crc = crc and 0xFFFF
-        return String.format(Locale.US, "%04X", crc)
     }
 
     private fun generarBitmapQr(contenido: String, ancho: Int, alto: Int): Bitmap? {

@@ -77,6 +77,7 @@ class OfflineDatabaseHelper(context: Context) :
         return db.insert(TABLE_COBROS, null, values)
     }
 
+    @Synchronized
     fun marcarComoSincronizado(idLocal: Long) {
         val db = writableDatabase
         val values = ContentValues().apply {
@@ -85,14 +86,26 @@ class OfflineDatabaseHelper(context: Context) :
         db.update(TABLE_COBROS, values, "id = ?", arrayOf(idLocal.toString()))
     }
 
+    @Synchronized
+    fun marcarComoPendiente(idLocal: Long) {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put("sincronizado", 0)
+        }
+        db.update(TABLE_COBROS, values, "id = ?", arrayOf(idLocal.toString()))
+    }
+
+    @Synchronized
     fun obtenerCobrosPendientes(): List<CobroPendienteSQLite> {
         val lista = mutableListOf<CobroPendienteSQLite>()
         val db = readableDatabase
+        // Solo obtener cobros que llevan más de 25 segundos pendientes para evitar choque con el envío en vivo
+        val limiteTiempo = (System.currentTimeMillis() - 25_000L).toString()
         val cursor = db.query(
             TABLE_COBROS,
             null,
-            "sincronizado = ?",
-            arrayOf("0"),
+            "sincronizado = ? AND timestamp < ?",
+            arrayOf("0", limiteTiempo),
             null,
             null,
             "timestamp ASC"

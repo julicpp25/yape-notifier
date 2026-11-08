@@ -56,15 +56,56 @@ class MyFirebaseMessagingService : FirebaseMessagingService(), TextToSpeech.OnIn
         prefs.edit().putString("fcm_token", token).apply()
     }
 
+    companion object {
+        @Volatile
+        private var ultimaHuellaPush: String = ""
+        @Volatile
+        private var ultimoTsPush: Long = 0L
+        private val lockPush = Any()
+    }
+
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
 
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
-        val ultimoCobroLocalMs = prefs.getLong("ultimo_cobro_local_ms", 0L)
-        if (System.currentTimeMillis() - ultimoCobroLocalMs < 30_000L) {
-            // Este mismo celular acaba de detectar y cantar el cobro directamente desde el lector de notificaciones.
-            // Se ignora el eco push para no duplicar notificación ni voz cuando se usa Dueño y Cajero en el mismo teléfono.
+
+        // 1. Si este celular es el del Dueño (Receptor Principal), IGNORAR SIEMPRE el Push de Firebase,
+        // porque el propio celular del Dueño ya detectó el Yape directamente por YapeListenerService.
+        val esCelularDueno = prefs.getBoolean("es_celular_dueño_receptor", false)
+        val esModoCajero = prefs.getBoolean("cajero_logueado", false)
+        if (esCelularDueno && !esModoCajero) {
             return
+        }
+
+        val ultimoCobroLocalMs = prefs.getLong("ultimo_cobro_local_ms", 0L)
+        if (System.currentTimeMillis() - ultimoCobroLocalMs < 45_000L) {
+            return
+        }
+
+        val titulo = remoteMessage.notification?.title ?: remoteMessage.data["titulo"] ?: "🔔 YapeAlDía"
+        val mensaje = remoteMessage.notification?.body ?: remoteMessage.data["mensaje"] ?: "¡Nuevo cobro recibido!"
+        val monto = remoteMessage.data["monto"] ?: ""
+
+        // 2. Escudo Anti-Duplicados Push de 60 segundos en el celular del Cajero
+        val nowMs = System.currentTimeMillis()
+        val huellaPushActual = "${mensaje.trim().lowercase(Locale.ROOT)}|${monto.trim()}"
+        synchronized(lockPush) {
+            val ultimaPref = prefs.getString("ultima_huella_push_cajero", "") ?: ""
+            val ultimoTsPref = prefs.getLong("ultimo_ts_push_cajero", 0L)
+            if ((huellaPushActual == ultimaHuellaPush && (nowMs - ultimoTsPush) < 60_000L) ||
+                (huellaPushActual == ultimaPref && (nowMs - ultimoTsPref) < 60_000L)
+            ) {
+                return
+            }
+            ultimaHuellaPush = huellaPushActual
+            ultimoTsPush = nowMs
+            // Marcar inmediatamente ultimo_cobro_local_ms para que si el Cajero tiene la pantalla MainActivity
+            // abierta, iniciarSincronizador() NO vuelva a cantar el mismo cobro una segunda vez.
+            prefs.edit()
+                .putString("ultima_huella_push_cajero", huellaPushActual)
+                .putLong("ultimo_ts_push_cajero", nowMs)
+                .putLong("ultimo_cobro_local_ms", nowMs)
+                .apply()
         }
 
         // Despertar CPU del celular del Cajero aunque esté con pantalla apagada o minimizado
@@ -73,10 +114,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService(), TextToSpeech.OnIn
             val wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "YapeAlDia::PushCajeroWakeLock")
             wl.acquire(6000L)
         } catch (e: Exception) {}
-
-        val titulo = remoteMessage.notification?.title ?: remoteMessage.data["titulo"] ?: "🔔 YapeAlDía"
-        val mensaje = remoteMessage.notification?.body ?: remoteMessage.data["mensaje"] ?: "¡Nuevo cobro recibido!"
-        val monto = remoteMessage.data["monto"] ?: ""
 
         mostrarNotificacionPush(titulo, mensaje)
 

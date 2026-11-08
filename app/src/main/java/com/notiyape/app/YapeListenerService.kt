@@ -293,6 +293,11 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         super.onNotificationPosted(sbn)
         if (sbn == null) return
 
+        // Ignorar notificaciones de resumen de grupo de Android (evita el segundo disparo automático de Yape)
+        if ((sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
+            return
+        }
+
         val pkg = sbn.packageName
         val esYape = (pkg == "com.bcp.innovacxion.yapeapp")
         val esInterbank = (pkg == "pe.com.interbank.mobilebanking")
@@ -398,19 +403,19 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         }
 
         // =========================================================================
-        // ESCUDO 5: ANTI-DUPLICADOS DE 45 SEGUNDOS (MEMORIA + PREFS)
-        // Evita que un mismo Yape se registre o cante 2 veces cuando Android lanza
-        // doble evento onNotificationPosted o cuando se prueba Dueño + Cajero en 1 celular.
+        // ESCUDO 5: ANTI-DUPLICADOS DE 60 SEGUNDOS (MEMORIA + PREFS)
+        // Bloquea cualquier segundo evento de Android para el mismo pago.
         // =========================================================================
         val nowMs = System.currentTimeMillis()
-        val huellaActual = "${remitente.lowercase(Locale.ROOT)}|${String.format(Locale.US, "%.2f", montoDouble)}|$metodo"
+        val montoNormalizado = String.format(Locale.US, "%.2f", montoDouble)
+        val huellaActual = "${remitente.lowercase(Locale.ROOT).trim()}|$montoNormalizado|$metodo"
         synchronized(lockDedup) {
             val ultimaPref = prefs.getString("ultima_huella_cobro", "") ?: ""
             val ultimoTsPref = prefs.getLong("ultimo_ts_cobro", 0L)
-            if ((huellaActual == ultimaHuellaMemoria && (nowMs - ultimoTsMemoria) < 45_000L) ||
-                (huellaActual == ultimaPref && (nowMs - ultimoTsPref) < 45_000L)
+            if ((huellaActual == ultimaHuellaMemoria && (nowMs - ultimoTsMemoria) < 60_000L) ||
+                (huellaActual == ultimaPref && (nowMs - ultimoTsPref) < 60_000L)
             ) {
-                return // Duplicado detectado dentro de los 45 segundos: se ignora por completo
+                return // Duplicado detectado dentro de los 60 segundos: se ignora por completo
             }
             ultimaHuellaMemoria = huellaActual
             ultimoTsMemoria = nowMs
@@ -418,68 +423,54 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                 .putString("ultima_huella_cobro", huellaActual)
                 .putLong("ultimo_ts_cobro", nowMs)
                 .putLong("ultimo_cobro_local_ms", nowMs)
-                .putString("ultimo_monto_local", monto)
+                .putString("ultimo_monto_local", montoNormalizado)
                 .apply()
         }
 
         // Despertar procesador durante 6.5 segundos aunque la pantalla esté apagada o bloqueada
         adquirirWakeLockTemporal(6500L)
 
-        // =========================================================================
-        // VERIFICADOR DE MONTO ESPERADO EN CAJA (ALERTA DE PAGO INCOMPLETO)
-        // =========================================================================
-        val montoEsperadoStr = prefs.getString("monto_esperado_pos", "") ?: ""
-        val montoEsperado = montoEsperadoStr.toDoubleOrNull() ?: 0.0
-        val cajeroOrdenEsperada = prefs.getString("cajero_orden_pos", "") ?: ""
-
-        // Anuncio en voz alta con timbre previo, nombre del cliente y verificación de monto completo
+        // Anuncio en voz alta con timbre previo y nombre del cliente
         val decirNombre = prefs.getBoolean("decir_nombre_voz", true)
         if (prefs.getBoolean("voz_activa", true)) {
-            reproducirTimbreYVoz(metodo, monto, remitente, decirNombre, montoDouble, montoEsperado)
+            reproducirTimbreYVoz(metodo, monto, remitente, decirNombre)
         }
 
-        // Si se cubrió el monto esperado en el POS, limpiamos la orden pendiente
-        if (montoEsperado > 0.0 && montoDouble >= (montoEsperado - 0.01)) {
-            prefs.edit().remove("monto_esperado_pos").remove("cajero_orden_pos").apply()
-        }
-
-        val cajeroActual = when {
-            cajeroOrdenEsperada.isNotEmpty() -> cajeroOrdenEsperada
-            prefs.getBoolean("cajero_logueado", false) -> prefs.getString("cajero_activo", "Caja") ?: "Caja"
-            else -> prefs.getString("cajero_activo", "Dueño") ?: "Dueño"
-        }
-
+        val cajeroActual = "Caja Principal"
         val horaActual = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(nowMs))
         val fechaHoy = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(nowMs))
+        val idUnicoOperacion = "${codigoTienda}_${remitente.replace(" ", "")}_${montoNormalizado}_$horaActual"
 
         // Guardar resumen del último cobro para el botón "🔊 Repetir Último"
         prefs.edit()
             .putString("ultimo_cobro_resumen", "$remitente|$monto|$metodo|$horaActual")
             .apply()
 
-        // 1. RESPALDO OFFLINE INMEDIATO EN SQLITE LOCAL (Nunca se pierde aunque no haya señal)
+        // 1. Insertar en SQLite inicialmente con sincronizado = true (1) para que MainActivity
+        // NUNCA lo tome mientras está viajando por internet y jamás lo envíe 2 veces al servidor.
         val dbHelper = OfflineDatabaseHelper(this)
         val idFilaSQLite = dbHelper.insertarCobroLocal(
             codigoTienda = codigoTienda,
             nombre = remitente,
-            monto = monto,
+            monto = montoNormalizado,
             metodo = metodo,
             cajero = cajeroActual,
             fecha = fechaHoy,
             hora = horaActual,
             timestamp = nowMs,
-            sincronizado = false
+            sincronizado = true
         )
 
-        guardarCobroLocal(remitente, monto, metodo)
+        guardarCobroLocal(remitente, montoNormalizado, metodo)
 
-        // 2. Intentar enviar a la nube y sincronizar cola offline pendiente si hay conexión
+        // 2. Enviar una única vez a la nube; solo si falla la conexión se marca como pendiente (0) en SQLite
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val json = JSONObject().apply {
                     put("codigoTienda", codigoTienda)
+                    put("idUnico", idUnicoOperacion)
                     put("nombre", "$remitente ($metodo)")
-                    put("monto", monto)
+                    put("monto", montoNormalizado)
                     put("cajero", cajeroActual)
                     put("fecha", fechaHoy)
                     put("hora", horaActual)
@@ -491,13 +482,16 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                 val exito = response.isSuccessful
                 response.close()
 
-                if (exito && idFilaSQLite != -1L) {
-                    dbHelper.marcarComoSincronizado(idFilaSQLite)
+                if (!exito && idFilaSQLite != -1L) {
+                    dbHelper.marcarComoPendiente(idFilaSQLite)
+                } else if (exito) {
                     sincronizarColaPendienteSQLite(dbHelper)
                 }
             } catch (e: Exception) {
-                // Sin conexión a internet: El cobro ya quedó resguardado en SQLite local (sincronizado = 0)
-                // Se enviará automáticamente cuando retorne la señal.
+                // Sin conexión a internet: marcamos la fila como pendiente (0) para subirla cuando vuelva la señal
+                if (idFilaSQLite != -1L) {
+                    dbHelper.marcarComoPendiente(idFilaSQLite)
+                }
             }
         }
     }
@@ -506,6 +500,8 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         val pendientes = dbHelper.obtenerCobrosPendientes()
         for (item in pendientes) {
             try {
+                // Marcar como sincronizado ANTES de enviar para que ningún otro hilo lo envíe duplicado
+                dbHelper.marcarComoSincronizado(item.idLocal)
                 val json = JSONObject().apply {
                     put("codigoTienda", item.codigoTienda)
                     put("nombre", "${item.nombre} (${item.metodo})")
@@ -518,11 +514,12 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                 val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
                 val req = Request.Builder().url(SERVIDOR_URL).post(body).build()
                 val res = client.newCall(req).execute()
-                if (res.isSuccessful) {
-                    dbHelper.marcarComoSincronizado(item.idLocal)
+                if (!res.isSuccessful) {
+                    dbHelper.marcarComoPendiente(item.idLocal)
                 }
                 res.close()
             } catch (e: Exception) {
+                dbHelper.marcarComoPendiente(item.idLocal)
                 break
             }
         }
@@ -532,27 +529,16 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         metodo: String,
         monto: String,
         remitente: String = "Cliente",
-        decirNombre: Boolean = true,
-        montoRecibido: Double = 0.0,
-        montoEsperado: Double = 0.0
+        decirNombre: Boolean = true
     ) {
-        val esPagoIncompleto = montoEsperado > 0.0 && montoRecibido > 0.0 && montoRecibido < (montoEsperado - 0.01)
         CoroutineScope(Dispatchers.Default).launch {
             try {
                 val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
                 val toneG = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
-                if (esPagoIncompleto) {
-                    // Alerta sonora grave de 3 toques para advertir pago incompleto en ambientes ruidosos
-                    repeat(3) {
-                        toneG.startTone(ToneGenerator.TONE_SUP_ERROR, 190)
-                        delay(240)
-                    }
-                } else {
-                    toneG.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
-                    delay(220)
-                }
+                toneG.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
+                delay(220)
                 toneG.release()
             } catch (e: Exception) {}
 
@@ -563,14 +549,8 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                 } else {
                     ""
                 }
-                val discurso = if (esPagoIncompleto) {
-                    val faltante = String.format(Locale.US, "%.2f", montoEsperado - montoRecibido).removeSuffix(".00")
-                    val esperadoTxt = String.format(Locale.US, "%.2f", montoEsperado).removeSuffix(".00")
-                    "¡Atención caja! Se recibió un $metodo de $fraseMonto$fraseCliente, pero el cobro en pantalla era de $esperadoTxt soles. ¡Faltan $faltante soles!"
-                } else {
-                    val animo = frasesMotivadoras.random()
-                    "¡Te llegó un $metodo de $fraseMonto$fraseCliente! $animo"
-                }
+                val animo = frasesMotivadoras.random()
+                val discurso = "¡Te llegó un $metodo de $fraseMonto$fraseCliente! $animo"
                 val params = Bundle().apply {
                     putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
                 }
