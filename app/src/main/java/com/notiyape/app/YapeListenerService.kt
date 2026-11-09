@@ -22,7 +22,9 @@ import android.service.notification.StatusBarNotification
 import android.speech.tts.TextToSpeech
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -40,9 +42,14 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
     @Volatile
     private var vozLista = false
     @Volatile
+    private var intentoMotorGenerico = false
+    @Volatile
     private var frasePendienteEnCola: String? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val client = OkHttpClient()
+    private var jobLatidoCajeroBg: Job? = null
+    private var ultimoIdCajeroBg = -1
+    private var ultimoAvisoBloqueoMs = 0L
 
     private val frasesMotivadoras = listOf(
         "¡A seguir vendiendo!",
@@ -187,10 +194,165 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         "¡Caja actualizada!"
     )
 
+    // =========================================================================
+    // 120 FRASES CORTAS Y GRACIOSAS "MODO BARRIO" DIVIDIDAS SEGÚN EL MONTO
+    // =========================================================================
+
+    // Rango 1: De S/ 0.10 a S/ 5.00 (30 frases - "Modo Sencillo / Misión Pan")
+    private val frasesBarrioSencillo = listOf(
+        "¡Todo suma, causa!",
+        "¡Salió para el pancito, habla bien!",
+        "¡Poquito a poquito se llena el chanchito!",
+        "¡Ya salió para el pasaje en combi!",
+        "¡Un sencillo más pa' la alcancía!",
+        "¡Así sea un solcito, suena bonito!",
+        "¡De sol en sol se arma el bolsón!",
+        "¡Chaufa es chaufa, batería!",
+        "¡Grano a grano llena la gallina el buche!",
+        "¡Salió para el marciano de fruta!",
+        "¡Algo es algo, peor es fiado!",
+        "¡Sencillito pero seguro, casero!",
+        "¡Ya tenemos para la emoliente con quinua!",
+        "¡Aunque sea chiquito, cayó al toque!",
+        "¡Paga chiquito pero paga al contado!",
+        "¡Para el chicle aunque sea, sobrino!",
+        "¡Suma, suma, que la caja no perdona!",
+        "¡Cualquier sol es bendición, causa!",
+        "¡Ya salió para el huevito de codorniz!",
+        "¡Misión pan con torreja completada!",
+        "¡Chiquito pero cumplidor ese cliente!",
+        "¡Al menos no pidió rebaja, habla bien!",
+        "¡Un sol más cerca de ser millonarios!",
+        "¡Gota a gota se llena la bota!",
+        "¡Salió pa' la canchita salada!",
+        "¡Plata es plata, así sea sencillo!",
+        "¡Cero fiado, puro yapeo al toque!",
+        "¡Buena voz, caserito cumplidor!",
+        "¡Directo al chanchito sin escala!",
+        "¡Un pasito más pa' la quincena!"
+    )
+
+    // Rango 2: De S/ 5.01 a S/ 30.00 (30 frases - "Modo Caserito Fino / Menú")
+    private val frasesBarrioMediano = listOf(
+        "¡Habla bien, batería! ¡Salió para el menú!",
+        "¡Esa gente fina, pagando sin pedir fiado!",
+        "¡Qué elegancia la de Francia, casero!",
+        "¡Hoy no se fía, mañana tampoco!",
+        "¡Ya salió para el chaufa con Inca Kola!",
+        "¡Así me gusta, pagando al toque!",
+        "¡Cliente que yapea rápido vale por dos!",
+        "¡Asu mare, estamos activos hoy!",
+        "¡Bien jugado, caserito, vuelva pronto!",
+        "¡Salió para el ceviche carretillero!",
+        "¡Pura gente positiva en este negocio!",
+        "¡Sonó la caja, sonríe el dueño!",
+        "¡Eso sí es un cliente de categoría!",
+        "¡Cayó redondito, sin llorar!",
+        "¡Habla, causa, sigue la buena racha!",
+        "¡Con este pago ya aseguramos el almuerzo!",
+        "¡Fino, fino, como ceviche de corvina!",
+        "¡Sin regatear, así da gusto atender!",
+        "¡Ese Yape entró más rápido que combi vacía!",
+        "¡Puro efectivo digital, cero billete falso!",
+        "¡Atiende bonito que el casero es puntual!",
+        "¡Ya salió para el lomito saltado!",
+        "¡Suelta la música que estamos vendiendo!",
+        "¡Calientito como pan recién salido!",
+        "¡Qué buena mano tiene ese cliente!",
+        "¡Paga y se va feliz, qué tal servicio!",
+        "¡Se mueve la caja, se mueve el barrio!",
+        "¡Bendito sea el Yape que no pide vuelto!",
+        "¡Otro cliente que no pide fiado, milagro!",
+        "¡Sigue sumando la máquina, sobrino!"
+    )
+
+    // Rango 3: De S/ 30.01 a S/ 99.99 (30 frases - "Modo Pollito a la Brasa / VIP")
+    private val frasesBarrioPollo = listOf(
+        "¡Uyuyuy! ¡Salió para el pollo a la brasa!",
+        "¡Qué abuso! ¡Ese cliente gasta como los dioses!",
+        "¡Ponle su yapita a ese casero VIP!",
+        "¡Billetón en la casa, habla bien!",
+        "¡Asu qué nivel, pura gente pudiente!",
+        "¡Fuego en la caja, hoy rompemos récord!",
+        "¡Con todas sus cremas, sobrino!",
+        "¡Ese Yape vino con fuerza de león!",
+        "¡Atención de primera para el jefe!",
+        "¡Hoy se come rico en la casa!",
+        "¡Qué tal jugada, directo a la ganancia!",
+        "¡Ese cliente vino con la billetera recargada!",
+        "¡Salió para la parrilla del fin de semana!",
+        "¡Cero miseria, puro gasto fino!",
+        "¡Aplaude caja que entró un buen billete!",
+        "¡Ese casero merece bolsa doble gratis!",
+        "¡Estamos en las grandes ligas, batería!",
+        "¡Suena fuerte ese altavoz que hay billete!",
+        "¡Como jugando ya subió la cuenta!",
+        "¡Póngale su refresco de cortesía al toque!",
+        "¡Así facturan los campeones del barrio!",
+        "¡Qué lindo suena cuando el monto es grande!",
+        "¡Ese cliente sí mueve la economía peruana!",
+        "¡Sin miedo al éxito, qué buena compra!",
+        "¡Agarra esa flor, venta de peso!",
+        "¡Entró fresquito como helado en verano!",
+        "¡Con clientes así trabajamos hasta domingo!",
+        "¡Se prendió la racha ganadora, causa!",
+        "¡Peso pesado en el mostrador!",
+        "¡Ya salió para pagar la luz con alegría!"
+    )
+
+    // Rango 4: De S/ 100.00 a más (30 frases - "Modo Patrón / Tío Rico")
+    private val frasesBarrioPatron = listOf(
+        "¡Aguanta el coche! ¡Llegó el patrón del barrio!",
+        "¡Alfombra roja para este cliente millonario!",
+        "¡Asu mare, qué tal billetón! ¡Cierra la tienda!",
+        "¡Alerta de magnate en el mostrador!",
+        "¡Habla, Tío Rico! ¡Invítale su gaseosa heladita!",
+        "¡Ese Yape pesó como lingote de oro!",
+        "¡Con esta venta ya hicimos el día, causa!",
+        "¡Silencio todos que acaba de pagar el jefe!",
+        "¡Bendecido y afortunado, qué tal ventaza!",
+        "¡Traigan seguridad que cayó un billetón!",
+        "¡Ese cliente juega en la Champions League!",
+        "¡Me desmayo! ¡Qué hermoso suena ese monto!",
+        "¡Fácil es el dueño del banco, atiéndelo rey!",
+        "¡Salió para el tono con orquesta completa!",
+        "¡Puro nivel gerencial en esta tienda!",
+        "¡Rompió el chanchito y nos dejó la gloria!",
+        "¡Un aplauso cerrado para este clientazo!",
+        "¡Hoy cenamos langosta en el barrio!",
+        "¡Qué tal golazo de media cancha, batería!",
+        "¡Pónganle aire acondicionado a ese casero!",
+        "¡Nivel Dubai en pleno mostrador!",
+        "¡Casi revienta el parlante con tanto billete!",
+        "¡Eso no es un Yape, es un aguinaldo!",
+        "¡Que vuelva todos los días ese patrón!",
+        "¡De frente a la bóveda fuerte, sobrino!",
+        "¡Con razón brillaba la puerta cuando entró!",
+        "¡Puro Santa Rosa digital en la cuenta!",
+        "¡Hicimos la América con este cobro!",
+        "¡Anoten su nombre en el cuadro de honor!",
+        "¡Qué espectáculo de venta, somos imparables!"
+    )
+
+    private fun obtenerFraseSegunModoYMonto(montoDouble: Double): String {
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        val modo = prefs.getString("modo_frases_voz", "MOTIVADOR") ?: "MOTIVADOR"
+        if (modo != "BARRIO") {
+            return frasesMotivadoras.random()
+        }
+        return when {
+            montoDouble <= 5.0 -> frasesBarrioSencillo.random()
+            montoDouble <= 30.0 -> frasesBarrioMediano.random()
+            montoDouble < 100.0 -> frasesBarrioPollo.random()
+            else -> frasesBarrioPatron.random()
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         iniciarEscudoForeground24x7()
         inicializarMotorVoz()
+        iniciarLatidoCajeroSegundoPlano()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -198,19 +360,19 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         if (!vozLista || motorVoz == null) {
             inicializarMotorVoz()
         }
+        iniciarLatidoCajeroSegundoPlano()
         revisarNotificacionesActivasRecientes()
         return START_STICKY
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        // ESCUDO ANTI-CIERRE PARA HONOR MAGIC 8 LITE, XIAOMI, SAMSUNG, OPPO Y VIVO:
-        // Cuando el usuario desliza y cierra la app de "Recientes", mantenemos vivo el servicio y el motor de voz
         adquirirWakeLockTemporal(6000L)
         iniciarEscudoForeground24x7()
         if (!vozLista || motorVoz == null) {
             inicializarMotorVoz()
         }
+        iniciarLatidoCajeroSegundoPlano()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             try {
                 requestRebind(ComponentName(this, YapeListenerService::class.java))
@@ -224,12 +386,12 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         if (!vozLista || motorVoz == null) {
             inicializarMotorVoz()
         }
+        iniciarLatidoCajeroSegundoPlano()
         revisarNotificacionesActivasRecientes()
     }
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
-        // ESCUDO AUTO-RECONEXIÓN: Si Honor MagicOS / MIUI / OneUI intenta desconectar el lector, se reconecta al instante
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             try {
                 requestRebind(ComponentName(this, YapeListenerService::class.java))
@@ -237,14 +399,85 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         }
     }
 
-    private fun inicializarMotorVoz() {
+    // =========================================================================
+    // PROTECCIÓN #5: SINCRONIZADOR 24/7 EN SEGUNDO PLANO PARA EL CAJERO
+    // Permite que el celular del Cajero cante los cobros aunque cierre la app o apague pantalla
+    // =========================================================================
+    private fun iniciarLatidoCajeroSegundoPlano() {
+        if (jobLatidoCajeroBg?.isActive == true) return
+        jobLatidoCajeroBg = CoroutineScope(Dispatchers.IO).launch {
+            while (isActive) {
+                try {
+                    val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+                    val esModoCajero = prefs.getBoolean("cajero_logueado", false)
+                    val esDueno = prefs.getBoolean("es_celular_dueño_receptor", false)
+                    val cod = prefs.getString("codigo_tienda", "") ?: ""
+
+                    if (esModoCajero && !esDueno && cod.isNotEmpty()) {
+                        val url = "$SERVIDOR_URL?accion=consultar_cobros&codigoTienda=$cod"
+                        val res = client.newCall(Request.Builder().url(url).get().build()).execute()
+                        val jsonStr = res.body?.string() ?: "[]"
+                        res.close()
+
+                        if (jsonStr.trim().startsWith("[")) {
+                            val arr = JSONArray(jsonStr)
+                            if (arr.length() > 0) {
+                                val ult = arr.getJSONObject(0)
+                                val idCobro = ult.optInt("id", -1)
+                                val monto = ult.optString("monto", "0.00")
+                                val nombre = ult.optString("nombre", "Cliente")
+                                val hora = ult.optString("hora", "")
+
+                                if (ultimoIdCajeroBg == -1) {
+                                    ultimoIdCajeroBg = idCobro
+                                } else if (idCobro > ultimoIdCajeroBg) {
+                                    ultimoIdCajeroBg = idCobro
+                                    val nowMs = System.currentTimeMillis()
+                                    val ultimoCobroLocalMs = prefs.getLong("ultimo_cobro_local_ms", 0L)
+                                    val montoDouble = monto.replace(",", ".").toDoubleOrNull() ?: 0.0
+                                    val huellaSinc = "${nombre.lowercase(Locale.ROOT).trim()}|${String.format(Locale.US, "%.2f", montoDouble)}|$hora"
+                                    val ultimaHuellaSinc = prefs.getString("ultima_huella_sinc_vista", "") ?: ""
+                                    val ultimoTsSinc = prefs.getLong("ultimo_ts_sinc_visto", 0L)
+
+                                    val yaFueCantado = ((nowMs - ultimoCobroLocalMs) < 55_000L) ||
+                                        (huellaSinc == ultimaHuellaSinc && (nowMs - ultimoTsSinc) < 90_000L)
+
+                                    if (!yaFueCantado && prefs.getBoolean("voz_activa", true)) {
+                                        prefs.edit()
+                                            .putString("ultima_huella_sinc_vista", huellaSinc)
+                                            .putLong("ultimo_ts_sinc_visto", nowMs)
+                                            .putLong("ultimo_cobro_local_ms", nowMs)
+                                            .putString("ultimo_cobro_resumen", "$nombre|$monto|Cobro|$hora")
+                                            .apply()
+
+                                        val metodoDet = if (nombre.contains("Plin", ignoreCase = true)) "Plin" else "Yape"
+                                        val nombreLimpio = nombre.replace(Regex("""\s*\(.*?\)\s*"""), "").trim()
+                                        val decirNombre = prefs.getBoolean("decir_nombre_voz", true)
+                                        emitirNotificacionCobroInstantanea(metodoDet, monto, nombreLimpio)
+                                        reproducirTimbreYVoz(metodoDet, monto, nombreLimpio, decirNombre, montoDouble)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {}
+                delay(5000L)
+            }
+        }
+    }
+
+    private fun inicializarMotorVoz(usarMotorPorDefecto: Boolean = false) {
         mainHandler.post {
             try {
                 motorVoz?.shutdown()
             } catch (e: Exception) {}
             vozLista = false
             try {
-                motorVoz = TextToSpeech(applicationContext, this, "com.google.android.tts")
+                motorVoz = if (!usarMotorPorDefecto) {
+                    TextToSpeech(applicationContext, this, "com.google.android.tts")
+                } else {
+                    TextToSpeech(applicationContext, this)
+                }
             } catch (e: Exception) {
                 try {
                     motorVoz = TextToSpeech(applicationContext, this)
@@ -258,7 +491,6 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             val activas = activeNotifications ?: return
             val ahora = System.currentTimeMillis()
             for (sbn in activas) {
-                // Solo revisar notificaciones publicadas en los últimos 45 segundos
                 if ((ahora - sbn.postTime) < 45_000L) {
                     onNotificationPosted(sbn)
                 }
@@ -328,8 +560,6 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
     }
 
     private fun emitirNotificacionCobroInstantanea(metodo: String, monto: String, remitente: String) {
-        // En Honor Magic 8 Lite, Xiaomi, OPPO, Vivo e Infinix, emitir una notificación IMPORTANCE_HIGH
-        // rompe de inmediato el congelador de caché (Cached Process Freezer) cuando la app está cerrada.
         try {
             val channelId = "yapealdia_cobros_alerta_alta"
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -341,7 +571,7 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                 ).apply {
                     description = "Despierta el altavoz de inmediato cuando llega un Yape o Plin con la app cerrada"
                     enableVibration(true)
-                    setSound(null, null) // Sin sonido propio para no tapar la voz TTS
+                    setSound(null, null)
                 }
                 nm.createNotificationChannel(canal)
             }
@@ -388,9 +618,28 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         } catch (e: Exception) {}
     }
 
+    // =========================================================================
+    // PROTECCIÓN #4: CASCADA DE IDIOMAS ESPAÑOL + RESPALDO MOTOR SAMSUNG/HONOR TTS
+    // =========================================================================
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            motorVoz?.language = Locale("es", "PE")
+            val localesEspanol = listOf(
+                Locale("es", "PE"),
+                Locale("es", "419"),
+                Locale("es", "US"),
+                Locale("es", "MX"),
+                Locale("es", "ES"),
+                Locale("es")
+            )
+            for (loc in localesEspanol) {
+                try {
+                    val res = motorVoz?.setLanguage(loc)
+                    if (res != TextToSpeech.LANG_MISSING_DATA && res != TextToSpeech.LANG_NOT_SUPPORTED) {
+                        break
+                    }
+                } catch (e: Exception) {}
+            }
+
             motorVoz?.setPitch(1.04f)
             motorVoz?.setSpeechRate(1.02f)
             val audioAttributes = AudioAttributes.Builder()
@@ -406,13 +655,15 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             } catch (e: Exception) {}
             vozLista = true
 
-            // Si había un cobro esperando porque Honor/Xiaomi había desconectado el motor de voz al cerrar la app,
-            // lo hablamos en este mismo instante sin esperar a que el usuario abra la app.
             val pendiente = frasePendienteEnCola
             if (!pendiente.isNullOrEmpty()) {
                 frasePendienteEnCola = null
                 hablarAhoraConFocoDeAudio(pendiente)
             }
+        } else if (!intentoMotorGenerico) {
+            // Si el celular (ej. Samsung / Honor) no tiene activo Google TTS, usamos el motor nativo del teléfono
+            intentoMotorGenerico = true
+            inicializarMotorVoz(usarMotorPorDefecto = true)
         }
     }
 
@@ -420,13 +671,11 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         super.onNotificationPosted(sbn)
         if (sbn == null) return
 
-        // Ignorar notificaciones de resumen de grupo de Android (evita el segundo disparo automático de Yape/Plin)
         if ((sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
             return
         }
 
         val pkg = sbn.packageName ?: return
-        // Ignorar nuestra propia app y apps de mensajería/redes sociales/navegadores para evitar falsas alarmas
         if (pkg == packageName ||
             pkg.contains("whatsapp", ignoreCase = true) ||
             pkg.contains("telegram", ignoreCase = true) ||
@@ -447,7 +696,6 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         val bigText = extras.getCharSequence("android.bigText")?.toString()?.trim() ?: ""
         val subText = extras.getCharSequence("android.subText")?.toString()?.trim() ?: ""
 
-        // Unificamos título y texto para que tanto Yape como Plin (Interbank, BBVA, Scotiabank, etc.) se reconozcan siempre
         val cuerpoPrincipal = if (bigText.isNotEmpty() && bigText.length >= text.length) bigText else text
         val baseTexto = if (title.isNotEmpty() && !cuerpoPrincipal.contains(title, ignoreCase = true)) {
             "$title $cuerpoPrincipal"
@@ -490,7 +738,7 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             pkg == "pe.com.izipay.izipayya" ||
             pkg == "pe.com.cajasullana.movil" ||
             pkg.contains("plin", ignoreCase = true) ||
-            textoCompleto.contains(Regex("(plinead|pinead|pline[oó]|recibiste un plin|abono plin)", RegexOption.IGNORE_CASE))
+            textoCompleto.contains(Regex("(plinead|pinead|pline[oó]|recibiste un plin|has recibido un plin|transferencia plin|abono plin|te hicieron un plin)", RegexOption.IGNORE_CASE))
         )
 
         if (esYape || esInterbank || esBBVA || esScotiabank || esBanbif || esOtraEntidadPlin) {
@@ -502,11 +750,14 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                 esBanbif -> "Plin BanBif"
                 else -> "Plin"
             }
-            procesarPago(textoCompleto, metodo)
+            val sbnKeyUnica = "${pkg}|${sbn.id}|${sbn.postTime}"
+            procesarPago(textoCompleto, metodo, sbnKeyUnica)
         }
     }
 
     companion object {
+        @Volatile
+        private var ultimaSbnKeyMemoria: String = ""
         @Volatile
         private var ultimaHuellaMemoria: String = ""
         @Volatile
@@ -514,17 +765,62 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         private val lockDedup = Any()
     }
 
-    private fun procesarPago(texto: String, metodo: String) {
+    // =========================================================================
+    // PROTECCIÓN #1: EXTRACTOR SEGURO DE MONTOS GRANDES (S/ 1,250.00 Y PEN)
+    // =========================================================================
+    private fun extraerMontoSeguroEnSoles(texto: String): Double? {
+        val regex = Regex("""(?:S/\.?|PEN)\s*([\d]{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?|[\d]+(?:[.,]\d{1,2})?)""", RegexOption.IGNORE_CASE)
+        val match = regex.find(texto) ?: return null
+        val crudo = match.groups[1]?.value?.trim() ?: return null
+
+        val normalizado = when {
+            // Caso miles con coma y decimal con punto: "1,250.50" -> "1250.50"
+            crudo.contains(",") && crudo.contains(".") -> {
+                if (crudo.lastIndexOf(".") > crudo.lastIndexOf(",")) {
+                    crudo.replace(",", "")
+                } else {
+                    crudo.replace(".", "").replace(",", ".")
+                }
+            }
+            // Caso coma de miles exacta sin decimales: "1,200" -> "1200"
+            crudo.contains(",") && crudo.substringAfterLast(",").length == 3 -> {
+                crudo.replace(",", "")
+            }
+            // Caso coma decimal: "15,50" -> "15.50"
+            crudo.contains(",") -> {
+                crudo.replace(",", ".")
+            }
+            else -> crudo
+        }
+        return normalizado.toDoubleOrNull()
+    }
+
+    private fun procesarPago(texto: String, metodo: String, sbnKeyUnica: String = "") {
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
         val codigoTienda = prefs.getString("codigo_tienda", "") ?: return
 
         // =========================================================================
         // ESCUDO 0: BLOQUEO DE YAPE/PLIN PERSONAL DEL CAJERO
-        // Solo el celular del Dueño (Receptor Oficial) debe leer notificaciones de Yape/Plin.
         // =========================================================================
         val esCelularDuenoReceptor = prefs.getBoolean("es_celular_dueño_receptor", false)
         val esModoCajero = prefs.getBoolean("cajero_logueado", false)
         if (!esCelularDuenoReceptor || esModoCajero) {
+            return
+        }
+
+        // =========================================================================
+        // PROTECCIÓN #3: DETECTAR SI EL CELULAR OCULTA NOTIFICACIONES EN BLOQUEO
+        // =========================================================================
+        val esNotificacionOcultaPorBloqueo = texto.contains(
+            Regex("(contenido oculto|notificación oculta|ocultó el contenido|tienes \\d+ notificaci|nuevas notificaciones)", RegexOption.IGNORE_CASE)
+        ) && !texto.contains(Regex("""(?:S/\.?|PEN)\s*\d""", RegexOption.IGNORE_CASE))
+
+        if (esNotificacionOcultaPorBloqueo) {
+            val ahora = System.currentTimeMillis()
+            if (ahora - ultimoAvisoBloqueoMs > 180_000L && prefs.getBoolean("voz_activa", true)) {
+                ultimoAvisoBloqueoMs = ahora
+                hablarAhoraConFocoDeAudio("¡Atención! Llegó una notificación de $metodo, pero tu celular oculta los datos en pantalla bloqueada. Activa mostrar contenido en pantalla de bloqueo.")
+            }
             return
         }
 
@@ -539,29 +835,28 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         }
 
         // =========================================================================
-        // ESCUDO 2: VERBO DE PAGO OBLIGATORIO (SOPORTA 'TE HA PLINEADO', 'TE HA PINEADO', ETC.)
+        // ESCUDO 2: VERBO DE PAGO OBLIGATORIO (YAPE Y TODOS LOS BANCOS PLIN)
         // =========================================================================
         val tieneVerboPago = texto.contains(
-            Regex("(te ha plinead|te ha pinead|ha plinead|ha pinead|plinead[oa]|pinead[oa]|te pline|pline[oó]|plineo|te ha yapead|ha yapead|yapead[oa]|te yape|yape[oó]|yapeo|te ha enviad|ha enviad|te envi|te ha mandad|te mand|te ha transferid|transfiri|recibiste un pago|pago de|recibiste un yape|recibiste un plin|envi[oó] un plin|envi[oó] por plin|abono plin|recibiste)", RegexOption.IGNORE_CASE)
+            Regex("(te ha plinead|te ha pinead|ha plinead|ha pinead|plinead[oa]|pinead[oa]|te pline|pline[oó]|plineo|te hicieron un plin|has recibido un plin|transferencia plin|operaci[oó]n plin|te ha yapead|ha yapead|yapead[oa]|te yape|yape[oó]|yapeo|te ha enviad|ha enviad|te envi|te ha mandad|te mand|te ha transferid|transfiri|recibiste un pago|pago de|recibiste un yape|recibiste un plin|envi[oó] un plin|envi[oó] por plin|abono plin|confirmaci[oó]n de pago|recibiste)", RegexOption.IGNORE_CASE)
         )
         if (!tieneVerboPago) {
             return
         }
 
         // =========================================================================
-        // 3. EXTRAER MONTO EN SOLES (Ej: S/ 15.00, S/. 15, S/.1.00, S/15,50)
+        // 3. EXTRAER MONTO EN SOLES SEGURO (Soporta S/ 1,250.00, S/.1.00, PEN 20.00)
         // =========================================================================
-        val regexMonto = Regex("""S/\.?\s*([\d]+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
-        val matchMonto = regexMonto.find(texto) ?: return
-        val monto = matchMonto.groups[1]?.value?.replace(",", ".") ?: return
-        val montoDouble = monto.toDoubleOrNull() ?: 0.0
+        val montoDouble = extraerMontoSeguroEnSoles(texto) ?: return
         if (montoDouble <= 0.0) return
+        val montoNormalizado = String.format(Locale.US, "%.2f", montoDouble)
+        val montoVozTexto = if (montoDouble % 1.0 == 0.0) montoDouble.toInt().toString() else montoNormalizado
 
         // =========================================================================
-        // 4. EXTRAER REMITENTE LIMPIO (Soporta 'Interbank Rosa ... te ha plineado / pineado')
+        // 4. EXTRAER REMITENTE LIMPIO
         // =========================================================================
         var remitente = "Cliente"
-        val regexVerbos = Regex("(te ha plinead[oa]|te ha pinead[oa]|ha plinead[oa]|ha pinead[oa]|te pline[oó]|plinead[oa]|pinead[oa]|pline[oó]|te ha yapead[oa]|ha yapead[oa]|te yape[oó]|yapead[oa]|yape[oó]|te ha enviad[oa]|ha enviad[oa]|te envi[oó]|te ha transferid[oa]|transfiri[oó]|te ha mandad[oa]|te mand[oó]|recibiste un pago de|recibiste un plin de|recibiste un yape de|pago de)", RegexOption.IGNORE_CASE)
+        val regexVerbos = Regex("(te ha plinead[oa]|te ha pinead[oa]|ha plinead[oa]|ha pinead[oa]|te pline[oó]|plinead[oa]|pinead[oa]|pline[oó]|te hicieron un plin|has recibido un plin de|transferencia plin de|te ha yapead[oa]|ha yapead[oa]|te yape[oó]|yapead[oa]|yape[oó]|te ha enviad[oa]|ha enviad[oa]|te envi[oó]|te ha transferid[oa]|transfiri[oó]|te ha mandad[oa]|te mand[oó]|recibiste un pago de|recibiste un plin de|recibiste un yape de|pago de)", RegexOption.IGNORE_CASE)
 
         if (texto.contains(regexVerbos)) {
             val antes = texto.split(regexVerbos)[0]
@@ -574,7 +869,6 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             }
         }
 
-        // Si el nombre aparece después ("de Juan Pérez")
         if (remitente == "Cliente" || remitente.length < 3) {
             val matchDe = Regex("""(?:de|por)\s+([A-Za-zÀ-ÿ\s]{3,35})""", RegexOption.IGNORE_CASE).find(texto)
             if (matchDe != null) {
@@ -589,18 +883,27 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         }
 
         // =========================================================================
-        // ESCUDO 5: ANTI-DUPLICADOS DE 60 SEGUNDOS (MEMORIA + PREFS)
+        // PROTECCIÓN #2: ESCUDO ANTI-REBOTE INTELIGENTE
+        // Bloquea el doble disparo de la MISMA notificación (sbnKeyUnica o <5 seg),
+        // pero permite que 2 clientes distintos paguen el mismo monto seguido.
         // =========================================================================
         val nowMs = System.currentTimeMillis()
-        val montoNormalizado = String.format(Locale.US, "%.2f", montoDouble)
         val huellaActual = "${remitente.lowercase(Locale.ROOT).trim()}|$montoNormalizado|$metodo"
+        val ventanaDedupMs = if (remitente.equals("Cliente", ignoreCase = true)) 4_000L else 6_500L
+
         synchronized(lockDedup) {
+            if (sbnKeyUnica.isNotEmpty() && sbnKeyUnica == ultimaSbnKeyMemoria) {
+                return // Es exactamente la misma notificación de Android re-evaluada
+            }
             val ultimaPref = prefs.getString("ultima_huella_cobro", "") ?: ""
             val ultimoTsPref = prefs.getLong("ultimo_ts_cobro", 0L)
-            if ((huellaActual == ultimaHuellaMemoria && (nowMs - ultimoTsMemoria) < 60_000L) ||
-                (huellaActual == ultimaPref && (nowMs - ultimoTsPref) < 60_000L)
+            if ((huellaActual == ultimaHuellaMemoria && (nowMs - ultimoTsMemoria) < ventanaDedupMs) ||
+                (huellaActual == ultimaPref && (nowMs - ultimoTsPref) < ventanaDedupMs)
             ) {
                 return
+            }
+            if (sbnKeyUnica.isNotEmpty()) {
+                ultimaSbnKeyMemoria = sbnKeyUnica
             }
             ultimaHuellaMemoria = huellaActual
             ultimoTsMemoria = nowMs
@@ -612,24 +915,22 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                 .apply()
         }
 
-        // 1. Despertar CPU por 12 segundos y emitir notificación de alta prioridad para romper
-        // el congelamiento en segundo plano de Honor Magic 8 Lite, Xiaomi, Samsung, OPPO y Vivo.
         adquirirWakeLockTemporal(12000L)
         emitirNotificacionCobroInstantanea(metodo, montoNormalizado, remitente)
 
-        // 2. Anuncio en voz alta inmediato con foco de audio y auto-reparación del motor TTS
         val decirNombre = prefs.getBoolean("decir_nombre_voz", true)
         if (prefs.getBoolean("voz_activa", true)) {
-            reproducirTimbreYVoz(metodo, monto, remitente, decirNombre)
+            reproducirTimbreYVoz(metodo, montoVozTexto, remitente, decirNombre, montoDouble)
         }
 
         val cajeroActual = "Caja Principal"
-        val horaActual = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(nowMs))
+        val horaActual = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(nowMs))
+        val horaCorta = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(nowMs))
         val fechaHoy = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(nowMs))
         val idUnicoOperacion = "${codigoTienda}_${remitente.replace(" ", "")}_${montoNormalizado}_$horaActual"
 
         prefs.edit()
-            .putString("ultimo_cobro_resumen", "$remitente|$monto|$metodo|$horaActual")
+            .putString("ultimo_cobro_resumen", "$remitente|$montoNormalizado|$metodo|$horaCorta")
             .apply()
 
         val dbHelper = OfflineDatabaseHelper(this)
@@ -640,7 +941,7 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             metodo = metodo,
             cajero = cajeroActual,
             fecha = fechaHoy,
-            hora = horaActual,
+            hora = horaCorta,
             timestamp = nowMs,
             sincronizado = true
         )
@@ -656,7 +957,7 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                     put("monto", montoNormalizado)
                     put("cajero", cajeroActual)
                     put("fecha", fechaHoy)
-                    put("hora", horaActual)
+                    put("hora", horaCorta)
                     put("timestamp", nowMs)
                 }
                 val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
@@ -710,7 +1011,8 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         metodo: String,
         monto: String,
         remitente: String = "Cliente",
-        decirNombre: Boolean = true
+        decirNombre: Boolean = true,
+        montoDouble: Double = 0.0
     ) {
         val metodoVoz = if (metodo.startsWith("Plin", ignoreCase = true)) "Plin" else metodo
         val fraseMonto = if (monto == "1" || monto == "1.00") "un sol" else "$monto soles"
@@ -719,7 +1021,8 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         } else {
             ""
         }
-        val animo = frasesMotivadoras.random()
+        val mNum = if (montoDouble > 0.0) montoDouble else (monto.replace(",", ".").toDoubleOrNull() ?: 1.0)
+        val animo = obtenerFraseSegunModoYMonto(mNum)
         val discurso = "¡Te llegó un $metodoVoz de $fraseMonto$fraseCliente! $animo"
 
         hablarAhoraConFocoDeAudio(discurso)
@@ -730,7 +1033,6 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         CoroutineScope(Dispatchers.Main).launch {
             try {
                 val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                // Solicitar foco de audio prioritario para despertar el canal multimedia en Honor / Xiaomi / Samsung
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     val reqFocus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                         .setAudioAttributes(
@@ -752,9 +1054,10 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
 
                 val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
+                // Doble timbre despertador (350ms) para despertar parlantes Bluetooth en reposo antes de hablar
                 val toneG = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
-                toneG.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
-                delay(200)
+                toneG.startTone(ToneGenerator.TONE_PROP_BEEP2, 240)
+                delay(320)
                 toneG.release()
             } catch (e: Exception) {}
 
@@ -764,8 +1067,6 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
 
             if (vozLista && motorVoz != null) {
                 val resultado = motorVoz?.speak(discurso, TextToSpeech.QUEUE_FLUSH, params, "ID_TTS_${System.currentTimeMillis()}")
-                // Si Honor MagicOS o Xiaomi desconectó el motor TTS al cerrar la app, speak() devuelve ERROR (-1).
-                // En ese caso guardamos la frase en cola y reconectamos el motor de voz en milisegundos.
                 if (resultado == TextToSpeech.ERROR) {
                     frasePendienteEnCola = discurso
                     inicializarMotorVoz()
@@ -805,6 +1106,7 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
     }
 
     override fun onDestroy() {
+        jobLatidoCajeroBg?.cancel()
         motorVoz?.stop()
         motorVoz?.shutdown()
         super.onDestroy()

@@ -33,6 +33,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.service.notification.NotificationListenerService
 import android.speech.tts.TextToSpeech
 import android.view.Gravity
 import android.view.View
@@ -99,6 +100,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var imgQrPOS: ImageView
     private lateinit var txtMontoQrPOS: TextView
     private lateinit var switchVozCaja: Switch
+    private lateinit var btnModoFraseMotivadora: Button
+    private lateinit var btnModoFraseBarrio: Button
     private lateinit var txtTotalHoyCaja: TextView
     private lateinit var txtDesgloseYapePlin: TextView
     private lateinit var txtEstadoReceptorDueno: TextView
@@ -492,6 +495,52 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         barraSubCaja.addView(txtInfoCajero); barraSubCaja.addView(switchVozCaja); barraSubCaja.addView(btnKeepScreen); barraSubCaja.addView(btnSalirCaj)
 
+        // Selector de Modo de Frases de Voz (💼 Motivadoras vs 😎 De Barrio según Monto - 120 frases)
+        val filaModosFrase = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            weightSum = 2f
+            setPadding(0, 0, 0, 10)
+        }
+        btnModoFraseMotivadora = Button(this).apply {
+            text = "💼 Frases Motivadoras"
+            textSize = 11.5f
+            setTypeface(null, Typeface.BOLD)
+            isAllCaps = false
+            setPadding(12, 10, 12, 10)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                setMargins(0, 0, 6, 0)
+            }
+            setOnClickListener {
+                prefs.edit().putString("modo_frases_voz", "MOTIVADOR").apply()
+                actualizarBotonesModoFrase(prefs)
+                Toast.makeText(this@MainActivity, "💼 Modo Frases Motivadoras activado", Toast.LENGTH_SHORT).show()
+                if (vozLista) {
+                    motorVozCajero?.speak("Modo frases motivadoras activado. ¡A seguir vendiendo!", TextToSpeech.QUEUE_FLUSH, null, "MODO_MOTIVADOR")
+                }
+            }
+        }
+        btnModoFraseBarrio = Button(this).apply {
+            text = "😎 Modo Barrio (Por Monto)"
+            textSize = 11.5f
+            setTypeface(null, Typeface.BOLD)
+            isAllCaps = false
+            setPadding(12, 10, 12, 10)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                setMargins(6, 0, 0, 0)
+            }
+            setOnClickListener {
+                prefs.edit().putString("modo_frases_voz", "BARRIO").apply()
+                actualizarBotonesModoFrase(prefs)
+                Toast.makeText(this@MainActivity, "😎 Modo Barrio activado (120 frases según monto)", Toast.LENGTH_SHORT).show()
+                if (vozLista) {
+                    motorVozCajero?.speak("Modo barrio activado. ¡Habla causa, esa platita no duerme!", TextToSpeech.QUEUE_FLUSH, null, "MODO_BARRIO")
+                }
+            }
+        }
+        filaModosFrase.addView(btnModoFraseMotivadora)
+        filaModosFrase.addView(btnModoFraseBarrio)
+        actualizarBotonesModoFrase(prefs)
+
         // Filtro Fechas Admin
         cardFiltroFechas = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -667,7 +716,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardHist.addView(crearBotonSecundario(this, "📲 Enviar Cuadre por WhatsApp") { enviarCuadrePorWhatsApp() })
         cardHist.addView(crearBotonSecundario(this, "📊 Descargar mi Excel (Google Sheets)") { descargarOesAbrirGoogleSheet() })
 
-        tabCajaPOS.addView(barraSubCaja); tabCajaPOS.addView(txtEstadoReceptorDueno); tabCajaPOS.addView(cardFiltroFechas); tabCajaPOS.addView(cardTotal); tabCajaPOS.addView(cardPOS); tabCajaPOS.addView(cardHist)
+        tabCajaPOS.addView(barraSubCaja); tabCajaPOS.addView(filaModosFrase); tabCajaPOS.addView(txtEstadoReceptorDueno); tabCajaPOS.addView(cardFiltroFechas); tabCajaPOS.addView(cardTotal); tabCajaPOS.addView(cardPOS); tabCajaPOS.addView(cardHist)
 
         // TAB 2: CAJEROS
         tabCajeros = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
@@ -1060,6 +1109,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cardFiltroFechas.visibility = if (esSesionDueño) View.VISIBLE else View.GONE
         codigoTiendaOculto = true
         actualizarVistaCodigoTienda(prefs)
+        actualizarBotonesModoFrase(prefs)
         btnNavCajeros.visibility = if (esSesionDueño) View.VISIBLE else View.GONE
         btnNavConfig.visibility = if (esSesionDueño) View.VISIBLE else View.GONE
         mostrarSeccion(layoutAppPrincipal)
@@ -1068,6 +1118,23 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         recargarListaCajeros(prefs)
         renderizarVistaQR()
         verificarYMostrarOptimizaciones(alEntrar = true)
+    }
+
+    private fun actualizarBotonesModoFrase(prefs: android.content.SharedPreferences) {
+        if (!::btnModoFraseMotivadora.isInitialized || !::btnModoFraseBarrio.isInitialized) return
+        val modo = prefs.getString("modo_frases_voz", "MOTIVADOR") ?: "MOTIVADOR"
+        val esBarrio = modo.equals("BARRIO", ignoreCase = true)
+        if (esBarrio) {
+            btnModoFraseBarrio.background = crearBordeRedondo("#D97706", "#B45309", 14f)
+            btnModoFraseBarrio.setTextColor(Color.WHITE)
+            btnModoFraseMotivadora.background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#F1F5F9", "#CBD5E1", 14f)
+            btnModoFraseMotivadora.setTextColor(Color.parseColor(if (esModoOscuro) "#CBD5E1" else "#475569"))
+        } else {
+            btnModoFraseMotivadora.background = crearBordeRedondo(COLOR_PRIMARY, "#4A1259", 14f)
+            btnModoFraseMotivadora.setTextColor(Color.WHITE)
+            btnModoFraseBarrio.background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#F1F5F9", "#CBD5E1", 14f)
+            btnModoFraseBarrio.setTextColor(Color.parseColor(if (esModoOscuro) "#CBD5E1" else "#475569"))
+        }
     }
 
     private fun actualizarVistaCodigoTienda(prefs: android.content.SharedPreferences) {
@@ -1442,8 +1509,31 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun reconectarComponenteLector() {
+        try {
+            val cn = ComponentName(this, YapeListenerService::class.java)
+            packageManager.setComponentEnabledSetting(
+                cn,
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP
+            )
+            packageManager.setComponentEnabledSetting(
+                cn,
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                PackageManager.DONT_KILL_APP
+            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                NotificationListenerService.requestRebind(cn)
+            }
+        } catch (e: Exception) {}
+    }
+
     private fun verificarYMostrarOptimizaciones(alEntrar: Boolean = true) {
         try {
+            val tLectorCheck = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")?.contains(packageName) == true
+            if (tLectorCheck) {
+                reconectarComponenteLector()
+            }
             val srvIntent = Intent(this, YapeListenerService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(srvIntent)
@@ -1938,7 +2028,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                                         reproducirTimbreYVozLocal(
                                             monto = monto,
                                             nombreCliente = nombre,
-                                            decirNombre = decirNombre
+                                            decirNombre = decirNombre,
+                                            montoRecibido = montoRecibidoDouble
                                         )
                                         Toast.makeText(this@MainActivity, "✅ ¡Cobro confirmado! S/ $monto de $nombre", Toast.LENGTH_LONG).show()
                                     }
@@ -1963,6 +2054,49 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun obtenerFraseSegunModoYMontoCaja(montoDouble: Double): String {
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        val modo = prefs.getString("modo_frases_voz", "MOTIVADOR") ?: "MOTIVADOR"
+        if (!modo.equals("BARRIO", ignoreCase = true)) {
+            val motivadoras = listOf(
+                "¡A seguir sumando!", "¡Excelente venta!", "¡Negocio en marcha!",
+                "¡Sumando ganancias!", "¡Cliente satisfecho!", "¡El negocio crece!",
+                "¡Buena racha!", "¡Caja llena!", "¡Seguimos facturando!", "¡Venta confirmada!"
+            )
+            return motivadoras.random()
+        }
+        return when {
+            montoDouble <= 5.00 -> listOf(
+                "¡Todo suma, caserito, para el pan!", "¡Sol a sol se llena el chanchito!",
+                "¡Ya salió para el pasaje!", "¡Sencillito pero seguro, causa!",
+                "¡Gota a gota se llena la caja!", "¡Para el marciano de fruta!",
+                "¡Ni el banco da tanto interés!", "¡Chiquito pero cumplidor!",
+                "¡Adiós fiado, hola efectivo!", "¡Para la gaseosita helada!"
+            ).random()
+            montoDouble <= 30.00 -> listOf(
+                "¡Habla bien, ya salió para el menú ejecutivo!", "¡Caserito fino, regresa pronto!",
+                "¡Con su yapecito da gusto atender!", "¡Ya salió para el chaufa con wantán!",
+                "¡Esa gente cumplidora vale oro!", "¡Suave con el billete que quema!",
+                "¡Así da gusto abrir temprano!", "¡Para el lomo saltado bien jugoso!",
+                "¡Buena voz, cliente estrella!", "¡Sin regatear, como buen casero!"
+            ).random()
+            montoDouble < 100.00 -> listOf(
+                "¡Uy curuju, hoy comemos pollito a la brasa con papas!", "¡Ese casero sí sabe comprar, caramba!",
+                "¡Cierra la calle que llegó el patrón!", "¡Saca la vuelta a la crisis, estamos facturando!",
+                "¡Hoy sale su ceviche mixto con chicharrón!", "¡Qué elegancia la de Francia!",
+                "¡Asu mare, se lució el casero!", "¡Pásame la crema huancaína que hoy se festeja!",
+                "¡Con este cobro nos vamos para arriba!", "¡Billetón al bolsillo, negocio bendecido!"
+            ).random()
+            else -> listOf(
+                "¡Asu mare, llegó el tío rico del barrio!", "¡Alerta de tiburón, cierra la puerta con candado!",
+                "¡Tráiganle una silla VIP y su gaseosa helada a este casero!", "¡Hoy se arma la jarana, tremendo billetón!",
+                "¡Con razón tembló el celular, qué tal cobro!", "¡Nivel Dios desbloqueado en la caja!",
+                "¡Guarda ese billete bajo siete llaves!", "¡Ese cliente merece estatua en la entrada!",
+                "¡Qué tal golazo de media cancha!", "¡Llegó el verdadero patrón del maletín!"
+            ).random()
+        }
+    }
+
     private fun reproducirTimbreYVozLocal(
         monto: String,
         nombreCliente: String = "Cliente",
@@ -1970,7 +2104,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         montoRecibido: Double = 0.0,
         montoEsperado: Double = 0.0
     ) {
-        val esPagoIncompleto = montoEsperado > 0.0 && montoRecibido > 0.0 && montoRecibido < (montoEsperado - 0.01)
+        val montoCalculado = if (montoRecibido > 0.0) montoRecibido else (monto.replace(",", ".").toDoubleOrNull() ?: 0.0)
+        val esPagoIncompleto = montoEsperado > 0.0 && montoCalculado > 0.0 && montoCalculado < (montoEsperado - 0.01)
         CoroutineScope(Dispatchers.Default).launch {
             try {
                 val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -1994,12 +2129,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             } else {
                 ""
             }
+            val remateModo = obtenerFraseSegunModoYMontoCaja(montoCalculado)
             val mensajeVoz = if (esPagoIncompleto) {
-                val faltante = String.format(Locale.US, "%.2f", montoEsperado - montoRecibido).removeSuffix(".00")
+                val faltante = String.format(Locale.US, "%.2f", montoEsperado - montoCalculado).removeSuffix(".00")
                 val esperadoTxt = String.format(Locale.US, "%.2f", montoEsperado).removeSuffix(".00")
                 "¡Atención caja! Se recibió $frase$fraseCliente, pero el cobro era de $esperadoTxt soles. ¡Faltan $faltante soles!"
             } else {
-                "¡Te llegó un cobro de $frase$fraseCliente! ¡A seguir sumando!"
+                "¡Te llegó un cobro de $frase$fraseCliente! $remateModo"
             }
             motorVozCajero?.speak(mensajeVoz, TextToSpeech.QUEUE_FLUSH, null, "TTS_CAJA")
         }
@@ -2422,7 +2558,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onInit(s: Int) {
         if (s == TextToSpeech.SUCCESS) {
-            motorVozCajero?.language = Locale("es", "PE")
+            val localesEspañol = listOf(
+                Locale("es", "PE"),
+                Locale("es", "419"),
+                Locale("es", "US"),
+                Locale("es", "MX"),
+                Locale("es", "ES"),
+                Locale("es")
+            )
+            for (loc in localesEspañol) {
+                val res = motorVozCajero?.setLanguage(loc) ?: TextToSpeech.LANG_NOT_SUPPORTED
+                if (res != TextToSpeech.LANG_MISSING_DATA && res != TextToSpeech.LANG_NOT_SUPPORTED) {
+                    break
+                }
+            }
             motorVozCajero?.setPitch(1.04f); motorVozCajero?.setSpeechRate(1.02f)
             vozLista = true
         }
