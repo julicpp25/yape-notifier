@@ -9,10 +9,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -34,7 +37,11 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
 
     private val SERVIDOR_URL = "https://script.google.com/macros/s/AKfycbw0_0UBYuP2yVjPHOmMDyLlehzvT41nuJPPCOnRw2Zd1V1Y57xI2nHUyVI1nSBhR7F_3w/exec"
     private var motorVoz: TextToSpeech? = null
+    @Volatile
     private var vozLista = false
+    @Volatile
+    private var frasePendienteEnCola: String? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val client = OkHttpClient()
 
     private val frasesMotivadoras = listOf(
@@ -183,26 +190,80 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
     override fun onCreate() {
         super.onCreate()
         iniciarEscudoForeground24x7()
-        try {
-            motorVoz = TextToSpeech(this, this, "com.google.android.tts")
-        } catch (e: Exception) {
-            motorVoz = TextToSpeech(this, this)
+        inicializarMotorVoz()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        iniciarEscudoForeground24x7()
+        if (!vozLista || motorVoz == null) {
+            inicializarMotorVoz()
+        }
+        revisarNotificacionesActivasRecientes()
+        return START_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // ESCUDO ANTI-CIERRE PARA HONOR MAGIC 8 LITE, XIAOMI, SAMSUNG, OPPO Y VIVO:
+        // Cuando el usuario desliza y cierra la app de "Recientes", mantenemos vivo el servicio y el motor de voz
+        adquirirWakeLockTemporal(6000L)
+        iniciarEscudoForeground24x7()
+        if (!vozLista || motorVoz == null) {
+            inicializarMotorVoz()
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                requestRebind(ComponentName(this, YapeListenerService::class.java))
+            } catch (e: Exception) {}
         }
     }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
         iniciarEscudoForeground24x7()
+        if (!vozLista || motorVoz == null) {
+            inicializarMotorVoz()
+        }
+        revisarNotificacionesActivasRecientes()
     }
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
-        // ESCUDO AUTO-RECONEXIÓN: Si el sistema intenta desconectar el lector, se reconecta solo
+        // ESCUDO AUTO-RECONEXIÓN: Si Honor MagicOS / MIUI / OneUI intenta desconectar el lector, se reconecta al instante
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             try {
                 requestRebind(ComponentName(this, YapeListenerService::class.java))
             } catch (e: Exception) {}
         }
+    }
+
+    private fun inicializarMotorVoz() {
+        mainHandler.post {
+            try {
+                motorVoz?.shutdown()
+            } catch (e: Exception) {}
+            vozLista = false
+            try {
+                motorVoz = TextToSpeech(applicationContext, this, "com.google.android.tts")
+            } catch (e: Exception) {
+                try {
+                    motorVoz = TextToSpeech(applicationContext, this)
+                } catch (ex: Exception) {}
+            }
+        }
+    }
+
+    private fun revisarNotificacionesActivasRecientes() {
+        try {
+            val activas = activeNotifications ?: return
+            val ahora = System.currentTimeMillis()
+            for (sbn in activas) {
+                // Solo revisar notificaciones publicadas en los últimos 45 segundos
+                if ((ahora - sbn.postTime) < 45_000L) {
+                    onNotificationPosted(sbn)
+                }
+            }
+        } catch (e: Exception) {}
     }
 
     private fun iniciarEscudoForeground24x7() {
@@ -215,7 +276,7 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                     "Guardia 24/7 YapeAlDía",
                     NotificationManager.IMPORTANCE_LOW
                 ).apply {
-                    description = "Mantiene el lector de cobros activo con pantalla apagada o minimizada"
+                    description = "Mantiene el lector de voz de Yape y Plin activo con app cerrada o pantalla apagada"
                     setShowBadge(false)
                 }
                 nm.createNotificationChannel(canal)
@@ -234,8 +295,8 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             val notif = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 Notification.Builder(this, channelId)
                     .setSmallIcon(android.R.drawable.ic_lock_idle_charging)
-                    .setContentTitle("🟢 YapeAlDía Activo 24/7")
-                    .setContentText("Escuchando y sincronizando cobros en segundo plano")
+                    .setContentTitle("🟢 YapeAlDía Activo 24/7 (Yape + Plin)")
+                    .setContentText("Altavoz de cobros activo con app cerrada o pantalla apagada")
                     .setOngoing(true)
                     .setContentIntent(pi)
                     .build()
@@ -243,22 +304,80 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                 @Suppress("DEPRECATION")
                 Notification.Builder(this)
                     .setSmallIcon(android.R.drawable.ic_lock_idle_charging)
-                    .setContentTitle("🟢 YapeAlDía Activo 24/7")
-                    .setContentText("Escuchando y sincronizando cobros en segundo plano")
+                    .setContentTitle("🟢 YapeAlDía Activo 24/7 (Yape + Plin)")
+                    .setContentText("Altavoz de cobros activo con app cerrada o pantalla apagada")
                     .setOngoing(true)
                     .setContentIntent(pi)
                     .build()
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(777, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+                try {
+                    startForeground(
+                        777,
+                        notif,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                    )
+                } catch (e: Exception) {
+                    startForeground(777, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+                }
             } else {
                 startForeground(777, notif)
             }
         } catch (e: Exception) {}
     }
 
-    private fun adquirirWakeLockTemporal(duracionMs: Long = 6500L) {
+    private fun emitirNotificacionCobroInstantanea(metodo: String, monto: String, remitente: String) {
+        // En Honor Magic 8 Lite, Xiaomi, OPPO, Vivo e Infinix, emitir una notificación IMPORTANCE_HIGH
+        // rompe de inmediato el congelador de caché (Cached Process Freezer) cuando la app está cerrada.
+        try {
+            val channelId = "yapealdia_cobros_alerta_alta"
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val canal = NotificationChannel(
+                    channelId,
+                    "Alertas Instantáneas de Cobros",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Despierta el altavoz de inmediato cuando llega un Yape o Plin con la app cerrada"
+                    enableVibration(true)
+                    setSound(null, null) // Sin sonido propio para no tapar la voz TTS
+                }
+                nm.createNotificationChannel(canal)
+            }
+
+            val intent = Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+            val pi = PendingIntent.getActivity(
+                this,
+                101,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(this, channelId)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(this).setPriority(Notification.PRIORITY_MAX)
+            }
+
+            val notif = builder
+                .setSmallIcon(android.R.drawable.stat_sys_Upload_done)
+                .setContentTitle("💰 ¡$metodo recibido: S/ $monto!")
+                .setContentText("De: $remitente • Registrado en YapeAlDía")
+                .setCategory(Notification.CATEGORY_ALARM)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .setAutoCancel(true)
+                .setContentIntent(pi)
+                .build()
+
+            nm.notify(888, notif)
+        } catch (e: Exception) {}
+    }
+
+    private fun adquirirWakeLockTemporal(duracionMs: Long = 12000L) {
         try {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             val wl = pm.newWakeLock(
@@ -286,6 +405,14 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                 if (mejorVoz != null) motorVoz?.voice = mejorVoz
             } catch (e: Exception) {}
             vozLista = true
+
+            // Si había un cobro esperando porque Honor/Xiaomi había desconectado el motor de voz al cerrar la app,
+            // lo hablamos en este mismo instante sin esperar a que el usuario abra la app.
+            val pendiente = frasePendienteEnCola
+            if (!pendiente.isNullOrEmpty()) {
+                frasePendienteEnCola = null
+                hablarAhoraConFocoDeAudio(pendiente)
+            }
         }
     }
 
@@ -293,34 +420,62 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         super.onNotificationPosted(sbn)
         if (sbn == null) return
 
-        // Ignorar notificaciones de resumen de grupo de Android (evita el segundo disparo automático de Yape)
+        // Ignorar notificaciones de resumen de grupo de Android (evita el segundo disparo automático de Yape/Plin)
         if ((sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
             return
         }
 
-        val pkg = sbn.packageName
+        val pkg = sbn.packageName ?: return
+        // Ignorar nuestra propia app y apps de mensajería/redes sociales para evitar falsas alarmas
+        if (pkg == packageName ||
+            pkg.contains("whatsapp", ignoreCase = true) ||
+            pkg.contains("telegram", ignoreCase = true) ||
+            pkg.contains("facebook", ignoreCase = true) ||
+            pkg.contains("instagram", ignoreCase = true) ||
+            pkg.contains("messaging", ignoreCase = true) ||
+            pkg.contains("mms", ignoreCase = true) ||
+            pkg.contains("gmail", ignoreCase = true)
+        ) {
+            return
+        }
+
         val esYape = (pkg == "com.bcp.innovacxion.yapeapp")
         val esInterbank = (pkg == "pe.com.interbank.mobilebanking")
-        val esBBVA = (pkg == "com.bbva.bbvacontigo")
-        val esScotiabank = (pkg == "com.scotiabank.peru.pe")
+        val esBBVA = (pkg == "com.bbva.bbvacontigo" || pkg == "com.bbva.nxt_peru")
+        val esScotiabank = (pkg == "com.scotiabank.peru.pe" || pkg == "pe.com.scotiabank.blpm.android.client")
         val esBanbif = (pkg == "com.banbif.bifmovil")
+        val esOtraEntidadPlin = (
+            pkg == "pe.com.cajaarequipa.movil" ||
+            pkg == "pe.com.izipay.izipayya" ||
+            pkg == "pe.com.cajasullana.movil" ||
+            pkg.contains("plin", ignoreCase = true)
+        )
 
-        if (esYape || esInterbank || esBBVA || esScotiabank || esBanbif) {
-            val extras = sbn.notification.extras
-            val text = extras.getCharSequence("android.text")?.toString()
-                ?: extras.getCharSequence("android.bigText")?.toString()
-                ?: extras.getString("android.title") ?: ""
+        val extras = sbn.notification.extras
+        val title = extras.getCharSequence("android.title")?.toString()?.trim() ?: ""
+        val text = extras.getCharSequence("android.text")?.toString()?.trim() ?: ""
+        val bigText = extras.getCharSequence("android.bigText")?.toString()?.trim() ?: ""
 
-            if (text.isNotEmpty()) {
-                val metodo = when {
-                    esYape -> "Yape"
-                    esInterbank -> "Plin Interbank"
-                    esBBVA -> "Plin BBVA"
-                    esScotiabank -> "Plin Scotiabank"
-                    else -> "Plin / Transferencia"
-                }
-                procesarPago(text, metodo)
+        // Unificamos título y texto para que tanto Yape como Plin (Interbank, BBVA, Scotiabank, etc.) se reconozcan siempre
+        val cuerpoPrincipal = if (bigText.isNotEmpty() && bigText.length >= text.length) bigText else text
+        val textoCompleto = if (title.isNotEmpty() && !cuerpoPrincipal.contains(title, ignoreCase = true)) {
+            "$title. $cuerpoPrincipal"
+        } else {
+            cuerpoPrincipal
+        }.trim()
+
+        if (textoCompleto.isEmpty()) return
+
+        if (esYape || esInterbank || esBBVA || esScotiabank || esBanbif || esOtraEntidadPlin) {
+            val metodo = when {
+                esYape -> "Yape"
+                esInterbank -> "Plin Interbank"
+                esBBVA -> "Plin BBVA"
+                esScotiabank -> "Plin Scotiabank"
+                esBanbif -> "Plin BanBif"
+                else -> "Plin"
             }
+            procesarPago(textoCompleto, metodo)
         }
     }
 
@@ -337,10 +492,8 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         val codigoTienda = prefs.getString("codigo_tienda", "") ?: return
 
         // =========================================================================
-        // ESCUDO 0: BLOQUEO DE YAPE PERSONAL DEL CAJERO
+        // ESCUDO 0: BLOQUEO DE YAPE/PLIN PERSONAL DEL CAJERO
         // Solo el celular del Dueño (Receptor Oficial) debe leer notificaciones de Yape/Plin.
-        // Si este celular está en modo Cajero, se ignoran todas las notificaciones locales
-        // para que los Yapes personales del empleado JAMÁS se registren en la tienda.
         // =========================================================================
         val esCelularDuenoReceptor = prefs.getBoolean("es_celular_dueño_receptor", false)
         val esModoCajero = prefs.getBoolean("cajero_logueado", false)
@@ -355,17 +508,17 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             Regex("(crédito|credito|préstamo|prestamo|pre-aprobado|aprobado al instante|pide tu|promoción|promo|descuento|sorteo|gana|premios|seguro|paga tus servicios|solicita)", RegexOption.IGNORE_CASE)
         )
         if (esPublicidad) {
-            return // Se descarta en silencio absoluto, no es un cobro
+            return
         }
 
         // =========================================================================
-        // ESCUDO 2: VERBO DE PAGO OBLIGATORIO (SOPORTA NUEVAS VARIANTES YAPE & PLIN)
+        // ESCUDO 2: VERBO DE PAGO OBLIGATORIO (YAPE Y PLIN EN SIMULTÁNEO)
         // =========================================================================
         val tieneVerboPago = texto.contains(
-            Regex("(te envi|te mand|transfiri|recibiste un pago|pago de|te yape|yapeó|yapeo|te pline|plineó|plineo|recibiste un yape|recibiste un plin|recibiste)", RegexOption.IGNORE_CASE)
+            Regex("(te envi|te mand|transfiri|recibiste un pago|pago de|te yape|yapeó|yapeo|te pline|plineó|plineo|recibiste un yape|recibiste un plin|envi[oó] un plin|envi[oó] por plin|abono plin|recibiste)", RegexOption.IGNORE_CASE)
         )
         if (!tieneVerboPago) {
-            return // Si no tiene frase de transferencia, se ignora
+            return
         }
 
         // =========================================================================
@@ -378,14 +531,17 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         if (montoDouble <= 0.0) return
 
         // =========================================================================
-        // 4. EXTRAER REMITENTE LIMPIO (Soporta nombres antes o después del verbo)
+        // 4. EXTRAER REMITENTE LIMPIO (Soporta formatos Yape y Plin de todos los bancos)
         // =========================================================================
         var remitente = "Cliente"
         val regexVerbos = Regex("(te envi[oó]|transfiri[oó]|te mand[oó]|recibiste un pago de|pago de|te yape[oó]|yape[oó]|te pline[oó]|pline[oó])", RegexOption.IGNORE_CASE)
 
         if (texto.contains(regexVerbos)) {
             val antes = texto.split(regexVerbos)[0]
-            val posible = antes.replace(Regex("(¡|!|Te llegó un Yape|Yape|Plin|Pago|Notificación)", RegexOption.IGNORE_CASE), "").trim()
+            val posible = antes.replace(
+                Regex("(¡|!|Confirmación de Pago\\.?|Confirmacion de Pago\\.?|Te llegó un Yape|Recibiste un Plin|Yape|Plin|Interbank|BBVA|Scotiabank|BanBif|Pago|Notificación)", RegexOption.IGNORE_CASE),
+                ""
+            ).trim()
             if (posible.isNotEmpty() && posible.length >= 3) {
                 remitente = posible
             }
@@ -396,7 +552,10 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             val matchDe = Regex("""(?:de|por)\s+([A-Za-zÀ-ÿ\s]{3,35})""", RegexOption.IGNORE_CASE).find(texto)
             if (matchDe != null) {
                 val candidata = matchDe.groups[1]?.value?.trim() ?: ""
-                if (candidata.isNotEmpty() && !candidata.contains("Yape", ignoreCase = true) && !candidata.contains("Plin", ignoreCase = true)) {
+                if (candidata.isNotEmpty() &&
+                    !candidata.contains("Yape", ignoreCase = true) &&
+                    !candidata.contains("Plin", ignoreCase = true)
+                ) {
                     remitente = candidata
                 }
             }
@@ -404,7 +563,6 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
 
         // =========================================================================
         // ESCUDO 5: ANTI-DUPLICADOS DE 60 SEGUNDOS (MEMORIA + PREFS)
-        // Bloquea cualquier segundo evento de Android para el mismo pago.
         // =========================================================================
         val nowMs = System.currentTimeMillis()
         val montoNormalizado = String.format(Locale.US, "%.2f", montoDouble)
@@ -415,7 +573,7 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             if ((huellaActual == ultimaHuellaMemoria && (nowMs - ultimoTsMemoria) < 60_000L) ||
                 (huellaActual == ultimaPref && (nowMs - ultimoTsPref) < 60_000L)
             ) {
-                return // Duplicado detectado dentro de los 60 segundos: se ignora por completo
+                return
             }
             ultimaHuellaMemoria = huellaActual
             ultimoTsMemoria = nowMs
@@ -427,10 +585,12 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                 .apply()
         }
 
-        // Despertar procesador durante 6.5 segundos aunque la pantalla esté apagada o bloqueada
-        adquirirWakeLockTemporal(6500L)
+        // 1. Despertar CPU por 12 segundos y emitir notificación de alta prioridad para romper
+        // el congelamiento en segundo plano de Honor Magic 8 Lite, Xiaomi, Samsung, OPPO y Vivo.
+        adquirirWakeLockTemporal(12000L)
+        emitirNotificacionCobroInstantanea(metodo, montoNormalizado, remitente)
 
-        // Anuncio en voz alta con timbre previo y nombre del cliente
+        // 2. Anuncio en voz alta inmediato con foco de audio y auto-reparación del motor TTS
         val decirNombre = prefs.getBoolean("decir_nombre_voz", true)
         if (prefs.getBoolean("voz_activa", true)) {
             reproducirTimbreYVoz(metodo, monto, remitente, decirNombre)
@@ -441,13 +601,10 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         val fechaHoy = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(nowMs))
         val idUnicoOperacion = "${codigoTienda}_${remitente.replace(" ", "")}_${montoNormalizado}_$horaActual"
 
-        // Guardar resumen del último cobro para el botón "🔊 Repetir Último"
         prefs.edit()
             .putString("ultimo_cobro_resumen", "$remitente|$monto|$metodo|$horaActual")
             .apply()
 
-        // 1. Insertar en SQLite inicialmente con sincronizado = true (1) para que MainActivity
-        // NUNCA lo tome mientras está viajando por internet y jamás lo envíe 2 veces al servidor.
         val dbHelper = OfflineDatabaseHelper(this)
         val idFilaSQLite = dbHelper.insertarCobroLocal(
             codigoTienda = codigoTienda,
@@ -463,7 +620,6 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
 
         guardarCobroLocal(remitente, montoNormalizado, metodo)
 
-        // 2. Enviar una única vez a la nube; solo si falla la conexión se marca como pendiente (0) en SQLite
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val json = JSONObject().apply {
@@ -488,7 +644,6 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                     sincronizarColaPendienteSQLite(dbHelper)
                 }
             } catch (e: Exception) {
-                // Sin conexión a internet: marcamos la fila como pendiente (0) para subirla cuando vuelva la señal
                 if (idFilaSQLite != -1L) {
                     dbHelper.marcarComoPendiente(idFilaSQLite)
                 }
@@ -500,7 +655,6 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         val pendientes = dbHelper.obtenerCobrosPendientes()
         for (item in pendientes) {
             try {
-                // Marcar como sincronizado ANTES de enviar para que ningún otro hilo lo envíe duplicado
                 dbHelper.marcarComoSincronizado(item.idLocal)
                 val json = JSONObject().apply {
                     put("codigoTienda", item.codigoTienda)
@@ -531,30 +685,67 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         remitente: String = "Cliente",
         decirNombre: Boolean = true
     ) {
-        CoroutineScope(Dispatchers.Default).launch {
+        val metodoVoz = if (metodo.startsWith("Plin", ignoreCase = true)) "Plin" else metodo
+        val fraseMonto = if (monto == "1" || monto == "1.00") "un sol" else "$monto soles"
+        val fraseCliente = if (decirNombre && remitente.isNotBlank() && !remitente.equals("Cliente", ignoreCase = true)) {
+            " de $remitente"
+        } else {
+            ""
+        }
+        val animo = frasesMotivadoras.random()
+        val discurso = "¡Te llegó un $metodoVoz de $fraseMonto$fraseCliente! $animo"
+
+        hablarAhoraConFocoDeAudio(discurso)
+    }
+
+    private fun hablarAhoraConFocoDeAudio(discurso: String) {
+        adquirirWakeLockTemporal(12000L)
+        CoroutineScope(Dispatchers.Main).launch {
             try {
                 val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                // Solicitar foco de audio prioritario para despertar el canal multimedia en Honor / Xiaomi / Samsung
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val reqFocus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                        .setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_MEDIA)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build()
+                        )
+                        .build()
+                    audioManager.requestAudioFocus(reqFocus)
+                } else {
+                    @Suppress("DEPRECATION")
+                    audioManager.requestAudioFocus(
+                        null,
+                        AudioManager.STREAM_MUSIC,
+                        AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                    )
+                }
+
                 val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
                 val toneG = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
                 toneG.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
-                delay(220)
+                delay(200)
                 toneG.release()
             } catch (e: Exception) {}
 
+            val params = Bundle().apply {
+                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+            }
+
             if (vozLista && motorVoz != null) {
-                val fraseMonto = if (monto == "1" || monto == "1.00") "un sol" else "$monto soles"
-                val fraseCliente = if (decirNombre && remitente.isNotBlank() && !remitente.equals("Cliente", ignoreCase = true)) {
-                    " de $remitente"
-                } else {
-                    ""
+                val resultado = motorVoz?.speak(discurso, TextToSpeech.QUEUE_FLUSH, params, "ID_TTS_${System.currentTimeMillis()}")
+                // Si Honor MagicOS o Xiaomi desconectó el motor TTS al cerrar la app, speak() devuelve ERROR (-1).
+                // En ese caso guardamos la frase en cola y reconectamos el motor de voz en milisegundos.
+                if (resultado == TextToSpeech.ERROR) {
+                    frasePendienteEnCola = discurso
+                    inicializarMotorVoz()
                 }
-                val animo = frasesMotivadoras.random()
-                val discurso = "¡Te llegó un $metodo de $fraseMonto$fraseCliente! $animo"
-                val params = Bundle().apply {
-                    putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
-                }
-                motorVoz?.speak(discurso, TextToSpeech.QUEUE_FLUSH, params, "ID_TTS")
+            } else {
+                frasePendienteEnCola = discurso
+                inicializarMotorVoz()
             }
         }
     }

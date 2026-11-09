@@ -7,11 +7,15 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.RingtoneManager
 import android.media.ToneGenerator
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -25,15 +29,30 @@ import java.util.Locale
 class MyFirebaseMessagingService : FirebaseMessagingService(), TextToSpeech.OnInitListener {
 
     private var motorVozPush: TextToSpeech? = null
+    @Volatile
     private var vozLista = false
+    @Volatile
     private var discursoPendiente: String? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate() {
         super.onCreate()
-        try {
-            motorVozPush = TextToSpeech(this, this, "com.google.android.tts")
-        } catch (e: Exception) {
-            motorVozPush = TextToSpeech(this, this)
+        inicializarTtsPush()
+    }
+
+    private fun inicializarTtsPush() {
+        mainHandler.post {
+            try {
+                motorVozPush?.shutdown()
+            } catch (e: Exception) {}
+            vozLista = false
+            try {
+                motorVozPush = TextToSpeech(applicationContext, this, "com.google.android.tts")
+            } catch (e: Exception) {
+                try {
+                    motorVozPush = TextToSpeech(applicationContext, this)
+                } catch (ex: Exception) {}
+            }
         }
     }
 
@@ -42,10 +61,16 @@ class MyFirebaseMessagingService : FirebaseMessagingService(), TextToSpeech.OnIn
             motorVozPush?.language = Locale("es", "PE")
             motorVozPush?.setPitch(1.04f)
             motorVozPush?.setSpeechRate(1.02f)
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+            motorVozPush?.setAudioAttributes(audioAttributes)
             vozLista = true
-            discursoPendiente?.let { texto ->
-                hablarEnSegundoPlano(texto)
+            val texto = discursoPendiente
+            if (!texto.isNullOrEmpty()) {
                 discursoPendiente = null
+                hablarEnSegundoPlano(texto)
             }
         }
     }
@@ -69,8 +94,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService(), TextToSpeech.OnIn
 
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
 
-        // 1. Si este celular es el del Dueño (Receptor Principal), IGNORAR SIEMPRE el Push de Firebase,
-        // porque el propio celular del Dueño ya detectó el Yape directamente por YapeListenerService.
+        // 1. Si este celular es el del Dueño (Receptor Principal), IGNORAR SIEMPRE el Push de Firebase
         val esCelularDueno = prefs.getBoolean("es_celular_dueño_receptor", false)
         val esModoCajero = prefs.getBoolean("cajero_logueado", false)
         if (esCelularDueno && !esModoCajero) {
@@ -99,8 +123,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService(), TextToSpeech.OnIn
             }
             ultimaHuellaPush = huellaPushActual
             ultimoTsPush = nowMs
-            // Marcar inmediatamente ultimo_cobro_local_ms para que si el Cajero tiene la pantalla MainActivity
-            // abierta, iniciarSincronizador() NO vuelva a cantar el mismo cobro una segunda vez.
             prefs.edit()
                 .putString("ultima_huella_push_cajero", huellaPushActual)
                 .putLong("ultimo_ts_push_cajero", nowMs)
@@ -108,11 +130,11 @@ class MyFirebaseMessagingService : FirebaseMessagingService(), TextToSpeech.OnIn
                 .apply()
         }
 
-        // Despertar CPU del celular del Cajero aunque esté con pantalla apagada o minimizado
+        // Despertar CPU del celular del Cajero durante 10 segundos aunque esté con app cerrada o pantalla apagada
         try {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             val wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "YapeAlDia::PushCajeroWakeLock")
-            wl.acquire(6000L)
+            wl.acquire(10000L)
         } catch (e: Exception) {}
 
         mostrarNotificacionPush(titulo, mensaje)
@@ -124,29 +146,48 @@ class MyFirebaseMessagingService : FirebaseMessagingService(), TextToSpeech.OnIn
             } else {
                 "¡Atención caja! $mensaje"
             }
-            if (vozLista) {
+            if (vozLista && motorVozPush != null) {
                 hablarEnSegundoPlano(fraseHablar)
             } else {
                 discursoPendiente = fraseHablar
+                inicializarTtsPush()
             }
         }
     }
 
     private fun hablarEnSegundoPlano(texto: String) {
-        CoroutineScope(Dispatchers.Default).launch {
+        CoroutineScope(Dispatchers.Main).launch {
             try {
                 val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val reqFocus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                        .setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_MEDIA)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build()
+                        )
+                        .build()
+                    am.requestAudioFocus(reqFocus)
+                } else {
+                    @Suppress("DEPRECATION")
+                    am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                }
                 am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0)
                 val tg = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
                 tg.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
-                delay(220)
+                delay(200)
                 tg.release()
             } catch (e: Exception) {}
 
             val params = Bundle().apply {
                 putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
             }
-            motorVozPush?.speak(texto, TextToSpeech.QUEUE_FLUSH, params, "TTS_PUSH_CAJERO")
+            val res = motorVozPush?.speak(texto, TextToSpeech.QUEUE_FLUSH, params, "TTS_PUSH_${System.currentTimeMillis()}")
+            if (res == TextToSpeech.ERROR) {
+                discursoPendiente = texto
+                inicializarTtsPush()
+            }
         }
     }
 
@@ -180,6 +221,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService(), TextToSpeech.OnIn
                 .setSmallIcon(android.R.drawable.stat_notify_chat)
                 .setContentTitle(titulo)
                 .setContentText(mensaje)
+                .setCategory(Notification.CATEGORY_ALARM)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
                 .build()
@@ -192,6 +235,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService(), TextToSpeech.OnIn
                 .setContentTitle(titulo)
                 .setContentText(mensaje)
                 .setSound(defaultSoundUri)
+                .setPriority(Notification.PRIORITY_MAX)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
                 .build()

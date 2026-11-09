@@ -7,8 +7,17 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Visibilidad explícita para que Android 11-15 y Honor MagicOS permitan reconectar el motor de voz TTS con la app cerrada -->
+    <queries>
+        <package android:name="com.google.android.tts" />
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -31,17 +40,19 @@
         <!-- Receptor de Notificaciones Push de Firebase (Despierta al Cajero 24/7 con Voz) -->
         <service
             android:name=".MyFirebaseMessagingService"
+            android:stopWithTask="false"
             android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
 
-        <!-- Lector de Notificaciones 24/7 con Escudo Foreground Service y WakeLock -->
+        <!-- Lector de Notificaciones 24/7 con Escudo Foreground Service (MediaPlayback + DataSync) y WakeLock -->
         <service
             android:name=".YapeListenerService"
             android:label="Lector de Pagos YapeAlDía"
-            android:foregroundServiceType="dataSync"
+            android:foregroundServiceType="mediaPlayback|dataSync"
+            android:stopWithTask="false"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
             android:exported="true">
             <intent-filter>

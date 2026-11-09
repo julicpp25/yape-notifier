@@ -7,12 +7,15 @@ import android.app.AlertDialog
 import android.app.DatePickerDialog
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.Base64
+import java.io.ByteArrayOutputStream
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.HybridBinarizer
@@ -57,7 +60,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private val REQ_GOOGLE_PICKER_REGISTRO = 1001
     private val REQ_GOOGLE_PICKER_LOGIN = 1002
-    private val REQ_SELECCIONAR_IMAGEN_QR = 1005
+    private val REQ_SELECCIONAR_IMAGEN_QR_YAPE = 1005
+    private val REQ_SELECCIONAR_IMAGEN_QR_PLIN = 1006
 
     private val COLOR_PRIMARY = "#6B1D7B"
     private val COLOR_ACCENT = "#00D2B4"
@@ -121,20 +125,31 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var badgeLectorStatus: TextView
     private lateinit var badgeBateriaStatus: TextView
     private lateinit var badgeNotifStatus: TextView
+    private lateinit var badgeMarcaStatus: TextView
     private lateinit var txtBannerCodigoCajeros: TextView
+    private lateinit var btnToggleVerCodigoTienda: Button
+    private var codigoTiendaOculto = true
     private lateinit var inCorreoRegistro: EditText
     private lateinit var inCorreoLoginDueño: EditText
     private lateinit var layoutListaCajerosAdmin: LinearLayout
     private lateinit var btnModoOscuroAjustes: Button
 
-    // QR DE YAPE
-    private var qrTemporalDetectado: String = ""
+    // QR DE YAPE Y PLIN EN SIMULTÁNEO
+    private var qrTemporalYapeDetectado: String = ""
+    private var qrTemporalYapeImgBase64: String = ""
+    private var qrTemporalPlinDetectado: String = ""
+    private var qrTemporalPlinImgBase64: String = ""
+    private var qrMostradorActivoTipo: String = "" // "YAPE", "PLIN" o ""
+    private lateinit var btnMostrarQrYapePOS: Button
+    private lateinit var btnMostrarQrPlinPOS: Button
     private lateinit var layoutContenedorQR: LinearLayout
     private lateinit var layoutAccionAdjuntarQr: LinearLayout
     private lateinit var layoutEstadoQrGuardado: LinearLayout
     private lateinit var txtEstadoQrGuardado: TextView
     private lateinit var txtPreviaQrDetectado: TextView
     private lateinit var btnGuardarQrDeYape: Button
+    private lateinit var txtPreviaQrPlinDetectado: TextView
+    private lateinit var btnGuardarQrDePlin: Button
 
     // FILTRO CALENDARIO (DECLARADOS CORRECTAMENTE)
     private lateinit var cardFiltroFechas: LinearLayout
@@ -414,9 +429,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         // ASISTENTE 3
         layoutPermiso3Bateria = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardP3 = crearTarjetaFintech(this)
-        cardP3.addView(TextView(this).apply { text = "🔋 Paso 3 de 3: Batería Sin Restricciones"; textSize = 18f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
-        cardP3.addView(TextView(this).apply { text = "⚡ Evita que el celular pause la app. Estará despierta todo el día para cantar cada cobro a tiempo."; textSize = 13f; setTextColor(Color.parseColor("#475569")); setPadding(0, 8, 0, 12) })
-        cardP3.addView(crearBotonPrimario(this, "OPTIMIZA BATERÍA PARA LA APP") { solicitarSinRestriccionesBateria() })
+        cardP3.addView(TextView(this).apply { text = "🔋 Paso 3 de 3: Segundo Plano (${obtenerNombreMarcaDetectada()})"; textSize = 18f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
+        cardP3.addView(TextView(this).apply { text = "⚡ Evita que tu celular ${obtenerNombreMarcaDetectada()} congele la voz al cerrar la app. Activa el botón de batería y el inicio en segundo plano de tu marca:"; textSize = 13f; setTextColor(Color.parseColor("#475569")); setPadding(0, 8, 0, 12) })
+        cardP3.addView(crearBotonPrimario(this, "1. OPTIMIZAR BATERÍA DE ANDROID") { solicitarSinRestriccionesBateria() })
+        cardP3.addView(crearBotonPrimario(this, "2. AUTORIZAR SEGUNDO PLANO (${obtenerNombreMarcaDetectada().uppercase(Locale.ROOT)}) 🛡️") {
+            abrirAjusteSegundoPlanoMultimarca()
+        }.apply {
+            background = crearBordeRedondo("#D97706", "#B45309", 18f)
+        })
         cardP3.addView(crearBotonSecundario(this, "Finalizar y Entrar a la App 🚀") {
             prefs.edit().putBoolean("asistente_permisos_listo", true).apply()
             entrarDirectoAlSistema()
@@ -534,10 +554,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         cardTotal.addView(rowTH); cardTotal.addView(txtTotalHoyCaja); cardTotal.addView(txtDesgloseYapePlin)
 
-        // Visor Limpio de Código QR Oficial de Mostrador (Sin teclado de monto falso)
+        // Visor Limpio de Códigos QR Oficiales de Mostrador (Yape 💜 + Plin 🩵 en simultáneo)
         val cardPOS = crearTarjetaFintech(this)
         val txtTituloQrMostrador = TextView(this).apply {
-            text = "📱 Código QR Oficial de Mostrador"
+            text = "📱 Códigos QR Oficiales de Mostrador (Yape y Plin)"
             textSize = 15f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_PRIMARY))
@@ -545,10 +565,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setPadding(0, 2, 0, 8)
         }
         imgQrPOS = ImageView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(480, 480).apply {
+            layoutParams = LinearLayout.LayoutParams(520, 520).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
                 setMargins(0, 10, 0, 10)
             }
+            scaleType = ImageView.ScaleType.FIT_CENTER
             visibility = View.GONE
         }
         txtMontoQrPOS = TextView(this).apply {
@@ -558,30 +579,48 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             gravity = Gravity.CENTER
             visibility = View.GONE
         }
-        val btnGenQr = crearBotonPrimario(this, "📱 MOSTRAR MI QR DE YAPE") {}
-        btnGenQr.setOnClickListener {
-            if (imgQrPOS.visibility == View.VISIBLE) {
-                imgQrPOS.visibility = View.GONE
-                txtMontoQrPOS.visibility = View.GONE
-                btnGenQr.text = "📱 MOSTRAR MI QR DE YAPE"
-                return@setOnClickListener
+
+        val filaBotonesQrMostrador = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            weightSum = 2f
+        }
+
+        btnMostrarQrYapePOS = Button(this).apply {
+            text = "💜 MOSTRAR QR YAPE"
+            textSize = 12f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            background = crearBordeRedondo("#742284", "#5B146B", 16f)
+            setPadding(12, 16, 12, 16)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                setMargins(0, 4, 6, 4)
             }
-            val qBase = prefs.getString("qr_base_yape", "") ?: ""
-            if (qBase.isEmpty()) {
-                Toast.makeText(this, "Primero sube la imagen de tu QR en la pestaña Cajeros", Toast.LENGTH_LONG).show()
-                return@setOnClickListener
-            }
-            val bmp = generarBitmapQr(qBase, 480, 480)
-            if (bmp != null) {
-                val nomTienda = prefs.getString("nombre_tienda", "Mi Negocio") ?: "Mi Negocio"
-                imgQrPOS.setImageBitmap(bmp)
-                imgQrPOS.visibility = View.VISIBLE
-                txtMontoQrPOS.text = "🏪 $nomTienda\n📲 Escanea con Yape o Plin y digita el monto en tu celular"
-                txtMontoQrPOS.visibility = View.VISIBLE
-                btnGenQr.text = "🙈 OCULTAR QR DE MOSTRADOR"
+            setOnClickListener {
+                alternarQrMostrador("YAPE", prefs)
             }
         }
-        cardPOS.addView(txtTituloQrMostrador); cardPOS.addView(btnGenQr); cardPOS.addView(imgQrPOS); cardPOS.addView(txtMontoQrPOS)
+
+        btnMostrarQrPlinPOS = Button(this).apply {
+            text = "🩵 MOSTRAR QR PLIN"
+            textSize = 12f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            background = crearBordeRedondo("#0284C7", "#0369A1", 16f)
+            setPadding(12, 16, 12, 16)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                setMargins(6, 4, 0, 4)
+            }
+            setOnClickListener {
+                alternarQrMostrador("PLIN", prefs)
+            }
+        }
+
+        filaBotonesQrMostrador.addView(btnMostrarQrYapePOS)
+        filaBotonesQrMostrador.addView(btnMostrarQrPlinPOS)
+        cardPOS.addView(txtTituloQrMostrador)
+        cardPOS.addView(filaBotonesQrMostrador)
+        cardPOS.addView(imgQrPOS)
+        cardPOS.addView(txtMontoQrPOS)
 
         // Historial con Buscador Rápido y Botón "🔊 Repetir Último"
         val cardHist = crearTarjetaFintech(this)
@@ -633,19 +672,83 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         // TAB 2: CAJEROS
         tabCajeros = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardCod = crearTarjetaFintech(this)
-        txtBannerCodigoCajeros = TextView(this).apply { textSize = 24f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor("#1D4ED8")); setPadding(0, 4, 0, 4) }
+        txtBannerCodigoCajeros = TextView(this).apply {
+            text = "🔑 ••••••••"
+            textSize = 24f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#1D4ED8"))
+            setPadding(0, 6, 0, 8)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        btnToggleVerCodigoTienda = Button(this).apply {
+            text = "👁️ Mostrar"
+            textSize = 12f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor(COLOR_PRIMARY))
+            background = crearBordeRedondo("#F3E8F7", "#D8B4E2", 14f)
+            setPadding(18, 10, 18, 10)
+            setOnClickListener {
+                codigoTiendaOculto = !codigoTiendaOculto
+                actualizarVistaCodigoTienda(prefs)
+            }
+        }
+        val filaCodigoTienda = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 4, 0, 6)
+            addView(txtBannerCodigoCajeros)
+            addView(btnToggleVerCodigoTienda)
+        }
         cardCod.addView(TextView(this).apply { text = "Punto de Caja para Celulares 🏪"; textSize = 16f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
-        cardCod.addView(txtBannerCodigoCajeros)
+        cardCod.addView(TextView(this).apply {
+            text = "🔒 Código protegido para evitar miradas de terceros. Toca '👁️ Mostrar' o '📋 Copiar' para compartirlo con tu cajero."
+            textSize = 12f
+            setTextColor(Color.parseColor("#64748B"))
+            setPadding(0, 4, 0, 4)
+        })
+        cardCod.addView(filaCodigoTienda)
         cardCod.addView(crearBotonPrimario(this, "📋 Copiar Código") {
             val cod = prefs.getString("codigo_tienda", "") ?: ""
             (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Codigo", cod))
-            Toast.makeText(this, "Código copiado", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "✅ Código copiado al portapapeles", Toast.LENGTH_SHORT).show()
         })
         tabCajeros.addView(cardCod)
 
         val cardNewCaj = crearTarjetaFintech(this)
         val inNCaj = crearInputFintech(this, "Nombre del Cajero (Ej: Carlos)")
-        val inPCaj = crearInputFintech(this, "PIN (4 dígitos)").apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER }
+        val filaPinNuevoCaj = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        var pinNuevoVisible = false
+        val inPCaj = crearInputFintech(this, "PIN secreto (4 dígitos ••••)").apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                setMargins(0, 4, 8, 10)
+            }
+        }
+        val btnVerPinNuevo = Button(this).apply {
+            text = "👁️"
+            textSize = 14f
+            background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 14f)
+            setPadding(16, 14, 16, 14)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, 4, 0, 10)
+            }
+            setOnClickListener {
+                pinNuevoVisible = !pinNuevoVisible
+                inPCaj.inputType = if (pinNuevoVisible) {
+                    android.text.InputType.TYPE_CLASS_NUMBER
+                } else {
+                    android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+                }
+                inPCaj.setSelection(inPCaj.text.length)
+                text = if (pinNuevoVisible) "🙈" else "👁️"
+            }
+        }
+        filaPinNuevoCaj.addView(inPCaj)
+        filaPinNuevoCaj.addView(btnVerPinNuevo)
+
         layoutListaCajerosAdmin = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val btnSaveCaj = crearBotonPrimario(this, "➕ Crear Cajero Nuevo") {
             val n = inNCaj.text.toString().trim()
@@ -659,58 +762,90 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         client.newCall(Request.Builder().url(SERVIDOR_URL).post(b).build()).execute().close()
                     } catch (e: Exception) {}
                 }
-                agregarCajeroLocal(prefs, n, p); inNCaj.setText(""); inPCaj.setText(""); recargarListaCajeros(prefs)
+                agregarCajeroLocal(prefs, n, p)
+                inNCaj.setText("")
+                inPCaj.setText("")
+                pinNuevoVisible = false
+                inPCaj.inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+                btnVerPinNuevo.text = "👁️"
+                recargarListaCajeros(prefs)
+                Toast.makeText(this, "✅ Cajero creado con PIN oculto y protegido", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Ingresa nombre y un PIN de al menos 4 dígitos", Toast.LENGTH_SHORT).show()
             }
         }
-        cardNewCaj.addView(TextView(this).apply { text = "👥 Cajeros Autorizados:"; textSize = 16f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
-        cardNewCaj.addView(inNCaj); cardNewCaj.addView(inPCaj); cardNewCaj.addView(btnSaveCaj); cardNewCaj.addView(layoutListaCajerosAdmin)
+        cardNewCaj.addView(TextView(this).apply { text = "👥 Cajeros Autorizados (PIN Protegido):"; textSize = 16f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
+        cardNewCaj.addView(inNCaj); cardNewCaj.addView(filaPinNuevoCaj); cardNewCaj.addView(btnSaveCaj); cardNewCaj.addView(layoutListaCajerosAdmin)
         tabCajeros.addView(cardNewCaj)
 
         val cardQRTab = crearTarjetaFintech(this)
-        cardQRTab.addView(TextView(this).apply { text = "📸 Configurar mi Código QR de Yape"; textSize = 16f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
-        cardQRTab.addView(Button(this).apply { text = "▶️ Ver Tutorial: Cómo obtener mi código QR de Yape"; setTextColor(Color.parseColor("#2563EB")); setBackgroundColor(Color.TRANSPARENT); textSize = 13f; setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(URL_TUTORIAL_QR))) } })
+        cardQRTab.addView(TextView(this).apply { text = "📸 Configurar mis Códigos QR (Yape 💜 y Plin 🩵)"; textSize = 16f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
+        cardQRTab.addView(TextView(this).apply {
+            text = "Puedes subir la captura de tu QR de Yape y también la captura de tu QR de Plin para que ambos funcionen al mismo tiempo en tu mostrador."
+            textSize = 12f
+            setTextColor(Color.parseColor("#64748B"))
+            setPadding(0, 4, 0, 8)
+        })
+        cardQRTab.addView(Button(this).apply { text = "▶️ Ver Tutorial: Cómo obtener mi código QR"; setTextColor(Color.parseColor("#2563EB")); setBackgroundColor(Color.TRANSPARENT); textSize = 13f; setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(URL_TUTORIAL_QR))) } })
 
         layoutContenedorQR = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
         layoutAccionAdjuntarQr = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val btnAdjuntarImgQR = crearBotonSecundario(this, "📷 Adjuntar Imagen de mi QR de Yape (Galería)") { abrirGaleriaParaQR() }
+        val btnAdjuntarImgQR = crearBotonSecundario(this, "💜 Adjuntar Captura de mi QR de YAPE (Galería)") {
+            abrirGaleriaParaQR(REQ_SELECCIONAR_IMAGEN_QR_YAPE)
+        }
         txtPreviaQrDetectado = TextView(this).apply {
-            text = "Toca el botón arriba para seleccionar la foto o captura de tu QR de Yape."
+            text = "Sube la foto o captura de tu QR de Yape."
             textSize = 12f
             setTextColor(Color.parseColor("#64748B"))
-            setPadding(0, 10, 0, 10)
+            setPadding(0, 6, 0, 8)
             gravity = Gravity.CENTER
         }
         btnGuardarQrDeYape = crearBotonPrimario(this, "Guardar mi QR de Yape 💾") {
-            guardarQrSeleccionado()
+            guardarQrSeleccionado("YAPE")
         }.apply { visibility = View.GONE }
+
+        val btnAdjuntarImgQRPlin = crearBotonSecundario(this, "🩵 Adjuntar Captura de mi QR de PLIN (Galería)") {
+            abrirGaleriaParaQR(REQ_SELECCIONAR_IMAGEN_QR_PLIN)
+        }
+        txtPreviaQrPlinDetectado = TextView(this).apply {
+            text = "Sube la foto o captura de tu QR de Plin (Interbank, BBVA, Scotiabank, etc.)."
+            textSize = 12f
+            setTextColor(Color.parseColor("#64748B"))
+            setPadding(0, 6, 0, 8)
+            gravity = Gravity.CENTER
+        }
+        btnGuardarQrDePlin = crearBotonPrimario(this, "Guardar mi QR de Plin 💾") {
+            guardarQrSeleccionado("PLIN")
+        }.apply {
+            background = crearBordeRedondo("#0284C7", "#0369A1", 18f)
+            visibility = View.GONE
+        }
 
         layoutAccionAdjuntarQr.addView(btnAdjuntarImgQR)
         layoutAccionAdjuntarQr.addView(txtPreviaQrDetectado)
         layoutAccionAdjuntarQr.addView(btnGuardarQrDeYape)
+        layoutAccionAdjuntarQr.addView(btnAdjuntarImgQRPlin)
+        layoutAccionAdjuntarQr.addView(txtPreviaQrPlinDetectado)
+        layoutAccionAdjuntarQr.addView(btnGuardarQrDePlin)
 
         layoutEstadoQrGuardado = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         txtEstadoQrGuardado = TextView(this).apply {
-            textSize = 14f
+            textSize = 13.5f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#15803D"))
             background = crearBordeRedondo(if (esModoOscuro) "#064E3B" else "#ECFDF5", "#10B981", 16f)
-            setPadding(24, 20, 24, 20)
+            setPadding(22, 18, 22, 18)
             gravity = Gravity.CENTER
         }
-        val btnCambiarQR = crearBotonSecundario(this, "🔄 Cambiar o Actualizar Foto de mi QR") {
-            qrTemporalDetectado = ""
-            txtPreviaQrDetectado.text = "Selecciona una nueva imagen de tu QR de Yape:"
-            txtPreviaQrDetectado.setTextColor(Color.parseColor("#64748B"))
-            btnGuardarQrDeYape.visibility = View.GONE
+        val btnCambiarQR = crearBotonSecundario(this, "🔄 Subir o Actualizar Captura de QR Yape / Plin") {
             layoutAccionAdjuntarQr.visibility = View.VISIBLE
-            layoutEstadoQrGuardado.visibility = View.GONE
         }
         layoutEstadoQrGuardado.addView(txtEstadoQrGuardado)
         layoutEstadoQrGuardado.addView(btnCambiarQR)
 
-        layoutContenedorQR.addView(layoutAccionAdjuntarQr)
         layoutContenedorQR.addView(layoutEstadoQrGuardado)
+        layoutContenedorQR.addView(layoutAccionAdjuntarQr)
         cardQRTab.addView(layoutContenedorQR)
         tabCajeros.addView(cardQRTab)
 
@@ -723,7 +858,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         badgeLectorStatus = crearPildoraEstado("Lector Yape/Plin") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
         badgeBateriaStatus = crearPildoraEstado("Segundo Plano 24/7") { solicitarSinRestriccionesBateria() }
         badgeNotifStatus = crearPildoraEstado("Alertas de Cobro") { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101) }
-        rowBdg.addView(badgeLectorStatus); rowBdg.addView(badgeBateriaStatus); rowBdg.addView(badgeNotifStatus)
+        badgeMarcaStatus = crearPildoraEstado("Inicio Segundo Plano (${obtenerNombreMarcaDetectada()})") { abrirAjusteSegundoPlanoMultimarca() }
+        rowBdg.addView(badgeLectorStatus); rowBdg.addView(badgeBateriaStatus); rowBdg.addView(badgeNotifStatus); rowBdg.addView(badgeMarcaStatus)
         btnModoOscuroAjustes = crearBotonSecundario(this, if (esModoOscuro) "☀️ Cambiar a Modo Claro" else "🌙 Cambiar a Modo Oscuro") {
             esModoOscuro = !esModoOscuro
             prefs.edit().putBoolean("modo_oscuro", esModoOscuro).putInt("restaurar_pestaña", 3).apply()
@@ -919,11 +1055,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun entrarDirectoAlSistema() {
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
         val nom = prefs.getString("nombre_tienda", "Mi Tienda")
-        val cod = prefs.getString("codigo_tienda", "")
         val caj = prefs.getString("cajero_activo", if (esSesionDueño) "Dueño (Admin)" else "Cajero")
         txtInfoCajero.text = if (esSesionDueño) "🏪 $nom | 👑 Dueño" else "🏪 $nom | 👤 $caj ($horaInicioTurnoStr)"
         cardFiltroFechas.visibility = if (esSesionDueño) View.VISIBLE else View.GONE
-        txtBannerCodigoCajeros.text = "🔑 $cod"
+        codigoTiendaOculto = true
+        actualizarVistaCodigoTienda(prefs)
         btnNavCajeros.visibility = if (esSesionDueño) View.VISIBLE else View.GONE
         btnNavConfig.visibility = if (esSesionDueño) View.VISIBLE else View.GONE
         mostrarSeccion(layoutAppPrincipal)
@@ -932,6 +1068,70 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         recargarListaCajeros(prefs)
         renderizarVistaQR()
         verificarYMostrarOptimizaciones(alEntrar = true)
+    }
+
+    private fun actualizarVistaCodigoTienda(prefs: android.content.SharedPreferences) {
+        val cod = prefs.getString("codigo_tienda", "") ?: ""
+        if (codigoTiendaOculto) {
+            txtBannerCodigoCajeros.text = "🔑 ••••••••"
+            if (::btnToggleVerCodigoTienda.isInitialized) {
+                btnToggleVerCodigoTienda.text = "👁️ Mostrar"
+            }
+        } else {
+            txtBannerCodigoCajeros.text = "🔑 $cod"
+            if (::btnToggleVerCodigoTienda.isInitialized) {
+                btnToggleVerCodigoTienda.text = "🙈 Ocultar"
+            }
+        }
+    }
+
+    private fun alternarQrMostrador(tipo: String, prefs: android.content.SharedPreferences) {
+        if (imgQrPOS.visibility == View.VISIBLE && qrMostradorActivoTipo == tipo) {
+            imgQrPOS.visibility = View.GONE
+            txtMontoQrPOS.visibility = View.GONE
+            qrMostradorActivoTipo = ""
+            btnMostrarQrYapePOS.text = "💜 MOSTRAR QR YAPE"
+            btnMostrarQrPlinPOS.text = "🩵 MOSTRAR QR PLIN"
+            return
+        }
+
+        val nomTienda = prefs.getString("nombre_tienda", "Mi Negocio") ?: "Mi Negocio"
+        val claveQr = if (tipo == "PLIN") "qr_base_plin" else "qr_base_yape"
+        val claveImgBase64 = if (tipo == "PLIN") "qr_img_base64_plin" else "qr_img_base64_yape"
+        val qrTexto = prefs.getString(claveQr, "") ?: ""
+        val imgBase64 = prefs.getString(claveImgBase64, "") ?: ""
+
+        var bmp: Bitmap? = null
+        if (qrTexto.isNotEmpty()) {
+            bmp = generarBitmapQr(qrTexto, 520, 520)
+        }
+        if (bmp == null && imgBase64.isNotEmpty()) {
+            bmp = decodificarBase64ABitmap(imgBase64)
+        }
+
+        if (bmp == null) {
+            val etiq = if (tipo == "PLIN") "Plin 🩵" else "Yape 💜"
+            Toast.makeText(
+                this,
+                "Primero sube la captura de tu QR de $etiq en la pestaña Cajeros",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        qrMostradorActivoTipo = tipo
+        imgQrPOS.setImageBitmap(bmp)
+        imgQrPOS.visibility = View.VISIBLE
+        txtMontoQrPOS.text = if (tipo == "PLIN") {
+            "🏪 $nomTienda • 🩵 QR OFICIAL PLIN\n📲 Escanea con Plin o Yape y digita el monto"
+        } else {
+            "🏪 $nomTienda • 💜 QR OFICIAL YAPE\n📲 Escanea con Yape o Plin y digita el monto"
+        }
+        txtMontoQrPOS.setTextColor(Color.parseColor(if (tipo == "PLIN") "#0284C7" else COLOR_PRIMARY))
+        txtMontoQrPOS.visibility = View.VISIBLE
+
+        btnMostrarQrYapePOS.text = if (tipo == "YAPE") "🙈 OCULTAR QR YAPE" else "💜 MOSTRAR QR YAPE"
+        btnMostrarQrPlinPOS.text = if (tipo == "PLIN") "🙈 OCULTAR QR PLIN" else "🩵 MOSTRAR QR PLIN"
     }
 
     private fun seleccionarPestaña(p: Int) {
@@ -965,6 +1165,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         badgeNotifStatus.text = "• Alertas en Pantalla: " + if (tNot) "🟢 ACTIVADO" else "🔴 DESACTIVADO (Toca)"
         badgeNotifStatus.setTextColor(Color.parseColor(if (tNot) "#15803D" else "#DC2626"))
         badgeNotifStatus.background = crearBordeRedondo(if (tNot) "#ECFDF5" else "#FEF2F2", if (tNot) "#A7F3D0" else "#FCA5A5", 12f)
+
+        if (::badgeMarcaStatus.isInitialized) {
+            badgeMarcaStatus.text = "• Inicio Automático (${obtenerNombreMarcaDetectada()}): 🛡️ Configurar"
+            badgeMarcaStatus.setTextColor(Color.parseColor("#B45309"))
+            badgeMarcaStatus.background = crearBordeRedondo("#FFFBEB", "#FDE68A", 12f)
+        }
     }
 
     private fun actualizarVistaSaldo() {
@@ -1130,6 +1336,97 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }.setNegativeButton("Cancelar", null).show()
     }
 
+    private fun obtenerNombreMarcaDetectada(): String {
+        val m = (Build.MANUFACTURER + " " + Build.BRAND).uppercase(Locale.ROOT)
+        return when {
+            m.contains("HONOR") -> "Honor (MagicOS)"
+            m.contains("HUAWEI") -> "Huawei (EMUI)"
+            m.contains("XIAOMI") || m.contains("REDMI") || m.contains("POCO") -> "Xiaomi / Redmi / POCO"
+            m.contains("SAMSUNG") -> "Samsung (One UI)"
+            m.contains("OPPO") || m.contains("REALME") -> "OPPO / Realme"
+            m.contains("VIVO") -> "Vivo"
+            m.contains("INFINIX") || m.contains("TECNO") -> "Infinix / Tecno"
+            else -> Build.MANUFACTURER.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+        }
+    }
+
+    private fun abrirAjusteSegundoPlanoMultimarca() {
+        val m = (Build.MANUFACTURER + " " + Build.BRAND).uppercase(Locale.ROOT)
+        val instrucciones = when {
+            m.contains("HONOR") || m.contains("HUAWEI") ->
+                "En tu ${obtenerNombreMarcaDetectada()}:\n\n" +
+                "1. Busca 'YapeAlDía' en la lista de 'Inicio de aplicaciones'.\n" +
+                "2. Desactiva 'Gestionar automáticamente'.\n" +
+                "3. Deja ACTIVADOS los 3 interruptores:\n" +
+                "   ✅ Inicio automático\n" +
+                "   ✅ Inicio secundario\n" +
+                "   ✅ Ejecutar en segundo plano\n\n" +
+                "Con esto, el altavoz sonará al instante aunque cierres la app."
+            m.contains("XIAOMI") || m.contains("REDMI") || m.contains("POCO") ->
+                "En tu ${obtenerNombreMarcaDetectada()}:\n\n" +
+                "1. Activa 'Inicio automático en segundo plano' para YapeAlDía.\n" +
+                "2. En 'Ahorro de batería', selecciona 'Sin restricciones'."
+            m.contains("SAMSUNG") ->
+                "En tu Samsung:\n\n" +
+                "1. Entra a 'Batería' dentro de la info de YapeAlDía.\n" +
+                "2. Selecciona 'No restringido' para que nunca entre en suspensión profunda."
+            m.contains("OPPO") || m.contains("REALME") || m.contains("VIVO") ->
+                "En tu ${obtenerNombreMarcaDetectada()}:\n\n" +
+                "1. Entra a 'Uso de batería'.\n" +
+                "2. Activa 'Permitir actividad en segundo plano' y 'Permitir inicio automático'."
+            else ->
+                "En los ajustes de la aplicación:\n\n" +
+                "1. Entra a 'Batería' o ' Segundo plano'.\n" +
+                "2. Elige 'Sin restricciones' o 'Permitir ejecución en segundo plano'."
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("🛡️ Blindaje 24/7 para ${obtenerNombreMarcaDetectada()}")
+            .setMessage(instrucciones)
+            .setPositiveButton("Abrir Ajuste Ahora ⚙️") { _, _ ->
+                lanzarIntentEspecificoDeMarca()
+            }
+            .setNegativeButton("Cerrar", null)
+            .show()
+    }
+
+    private fun lanzarIntentEspecificoDeMarca() {
+        val intentsPosibles = listOf(
+            // Honor MagicOS (Magic 8 Lite, Magic 7 Lite, X8, etc.)
+            Intent().setComponent(ComponentName("com.hihonor.systemmanager", "com.hihonor.systemmanager.optimize.process.ProtectActivity")),
+            Intent().setComponent(ComponentName("com.hihonor.systemmanager", "com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity")),
+            // Huawei EMUI
+            Intent().setComponent(ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity")),
+            Intent().setComponent(ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity")),
+            // Xiaomi / Redmi / POCO (MIUI / HyperOS)
+            Intent().setComponent(ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")),
+            // OPPO / Realme (ColorOS)
+            Intent().setComponent(ComponentName("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity")),
+            Intent().setComponent(ComponentName("com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity")),
+            // Vivo
+            Intent().setComponent(ComponentName("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity")),
+            // Infinix / Tecno
+            Intent().setComponent(ComponentName("com.transsion.phonemaster", "com.cyin.himgr.autostart.AutoStartActivity"))
+        )
+
+        for (intentMarca in intentsPosibles) {
+            try {
+                intentMarca.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(intentMarca)
+                return
+            } catch (e: Exception) {}
+        }
+
+        // Si el fabricante bloquea el acceso directo o es Samsung/Motorola, abrimos la ficha de la app
+        try {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:$packageName")
+            })
+        } catch (e: Exception) {
+            solicitarSinRestriccionesBateria()
+        }
+    }
+
     private fun solicitarSinRestriccionesBateria() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -1140,13 +1437,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
                 }
             } else {
-                Toast.makeText(this, "✅ YapeAlDía ya está optimizada para segundo plano 24/7.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "✅ Batería de Android optimizada para 24/7.", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
     private fun verificarYMostrarOptimizaciones(alEntrar: Boolean = true) {
-        // Iniciar el servicio en primer plano 24/7 para que funcione con pantalla apagada o minimizado
         try {
             val srvIntent = Intent(this, YapeListenerService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -1160,7 +1456,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val tBat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) pm.isIgnoringBatteryOptimizations(packageName) else true
         val tNot = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED else true
 
-        // Si es Cajero, NO le pedimos el Lector de Notificaciones (para proteger su Yape personal)
         if (!esSesionDueño) {
             if (tBat && tNot) return
             val layCaj = LinearLayout(this).apply {
@@ -1174,7 +1469,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 setTextColor(Color.parseColor(COLOR_PRIMARY))
             })
             layCaj.addView(TextView(this).apply {
-                text = "Tu celular NO leerá tus notificaciones personales de Yape. Solo activa estas 2 opciones para que tu teléfono cante los cobros de la tienda:"
+                text = "Tu celular NO leerá tus notificaciones personales de Yape. Solo activa estas opciones para que tu teléfono cante los cobros de la tienda:"
                 textSize = 13f
                 setTextColor(Color.parseColor(if (esModoOscuro) "#CBD5E1" else "#475569"))
                 setPadding(0, 10, 0, 15)
@@ -1197,6 +1492,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }.apply {
                 background = crearBordeRedondo(if (tBat) "#10B981" else "#D97706", if (tBat) "#059669" else "#D97706", 16f)
             })
+            layCaj.addView(crearBotonPrimario(
+                this,
+                "🛡️ 3. Autorizar Segundo Plano en ${obtenerNombreMarcaDetectada()}"
+            ) {
+                abrirAjusteSegundoPlanoMultimarca()
+            }.apply {
+                background = crearBordeRedondo("#742284", "#5B146B", 16f)
+            })
             AlertDialog.Builder(this)
                 .setView(layCaj)
                 .setPositiveButton("Entrar a Caja 🚀") { d, _ -> d.dismiss() }
@@ -1209,7 +1512,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         if (tLector && tBat && tNot) {
             if (!alEntrar) {
-                Toast.makeText(this, "✅ Escudo 24/7 Activo (3 de 3 listos). Funciona con pantalla apagada o minimizada.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "✅ Escudo 24/7 Activo (3 de 3 listos). Funciona con app cerrada o pantalla apagada.", Toast.LENGTH_LONG).show()
             }
             return
         }
@@ -1220,13 +1523,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         val txtTit = TextView(this).apply {
-            text = "🛡️ Escudo 24/7 (Celular del Dueño) • $completados de 3 listos"
+            text = "🛡️ Escudo 24/7 (${obtenerNombreMarcaDetectada()}) • $completados de 3 listos"
             textSize = 17f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor(COLOR_PRIMARY))
         }
         val txtDesc = TextView(this).apply {
-            text = "Activa estos 3 permisos en el celular del Dueño para que YapeAlDía detecte, cante y guarde los cobros aunque la pantalla esté apagada:"
+            text = "Activa estos permisos en el celular del Dueño para que YapeAlDía detecte y cante Yape y Plin aunque cierres la app:"
             textSize = 13f
             setTextColor(Color.parseColor(if (esModoOscuro) "#CBD5E1" else "#475569"))
             setPadding(0, 10, 0, 15)
@@ -1268,6 +1571,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         lay.addView(btnBateria)
 
+        val btnMarcaEspecial = crearBotonPrimario(
+            this,
+            "🛡️ 4. Desbloquear Segundo Plano en ${obtenerNombreMarcaDetectada()}"
+        ) {
+            abrirAjusteSegundoPlanoMultimarca()
+        }.apply {
+            background = crearBordeRedondo("#4A1259", "#6B1D7B", 16f)
+        }
+        lay.addView(btnMarcaEspecial)
+
         AlertDialog.Builder(this)
             .setView(lay)
             .setPositiveButton("Continuar a mi Caja 🚀") { d, _ -> d.dismiss() }
@@ -1291,15 +1604,39 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }.setNegativeButton("Cancelar", null).show()
     }
 
-    private fun abrirGaleriaParaQR() {
+    private fun abrirGaleriaParaQR(requestCode: Int) {
         val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
             type = "image/*"
             addCategory(Intent.CATEGORY_OPENABLE)
         }
-        startActivityForResult(intent, REQ_SELECCIONAR_IMAGEN_QR)
+        startActivityForResult(intent, requestCode)
     }
 
-    private fun procesarImagenQrSeleccionada(uri: Uri) {
+    private fun codificarBitmapABase64(bitmap: Bitmap): String {
+        return try {
+            val maxDim = 560
+            val ratio = minOf(maxDim.toFloat() / bitmap.width, maxDim.toFloat() / bitmap.height, 1f)
+            val w = (bitmap.width * ratio).toInt().coerceAtLeast(1)
+            val h = (bitmap.height * ratio).toInt().coerceAtLeast(1)
+            val escalado = Bitmap.createScaledBitmap(bitmap, w, h, true)
+            val baos = ByteArrayOutputStream()
+            escalado.compress(Bitmap.CompressFormat.JPEG, 82, baos)
+            Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private fun decodificarBase64ABitmap(base64Str: String): Bitmap? {
+        return try {
+            val bytes = Base64.decode(base64Str, Base64.DEFAULT)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun procesarImagenQrSeleccionada(uri: Uri, tipo: String) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val inputStream = contentResolver.openInputStream(uri)
@@ -1311,77 +1648,127 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     return@launch
                 }
 
-                val intArray = IntArray(bitmap.width * bitmap.height)
-                bitmap.getPixels(intArray, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-                val source = RGBLuminanceSource(bitmap.width, bitmap.height, intArray)
-                val binaryBitmap = BinaryBitmap(HybridBinarizer(source))
-                val reader = QRCodeReader()
-                val result = reader.decode(binaryBitmap)
-                val textoQr = result.text
+                // 1. Guardamos siempre respaldo visual de la captura para que cualquier QR de Yape o Plin funcione al 100%
+                val imgBase64 = codificarBitmapABase64(bitmap)
+
+                // 2. Intentamos extraer también la trama QR con ZXing para regenerarlo en alta nitidez
+                var textoQrExtraido = ""
+                try {
+                    val intArray = IntArray(bitmap.width * bitmap.height)
+                    bitmap.getPixels(intArray, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                    val source = RGBLuminanceSource(bitmap.width, bitmap.height, intArray)
+                    val binaryBitmap = BinaryBitmap(HybridBinarizer(source))
+                    val reader = QRCodeReader()
+                    textoQrExtraido = reader.decode(binaryBitmap).text ?: ""
+                } catch (e: Exception) {
+                    textoQrExtraido = ""
+                }
 
                 runOnUiThread {
-                    qrTemporalDetectado = textoQr
-                    txtPreviaQrDetectado.text = "✅ QR de Yape reconocido con éxito.\nAhora toca 'Guardar mi QR de Yape 💾' para vincularlo a tu caja."
-                    txtPreviaQrDetectado.setTextColor(Color.parseColor("#15803D"))
-                    btnGuardarQrDeYape.visibility = View.VISIBLE
-                    Toast.makeText(this@MainActivity, "¡QR de Yape detectado! Toca 'Guardar mi QR de Yape 💾'", Toast.LENGTH_LONG).show()
+                    if (tipo == "PLIN") {
+                        qrTemporalPlinDetectado = textoQrExtraido
+                        qrTemporalPlinImgBase64 = imgBase64
+                        txtPreviaQrPlinDetectado.text = "✅ Captura de QR de PLIN lista.\nAhora toca 'Guardar mi QR de Plin 💾' para activarlo en tu mostrador."
+                        txtPreviaQrPlinDetectado.setTextColor(Color.parseColor("#0284C7"))
+                        btnGuardarQrDePlin.visibility = View.VISIBLE
+                        Toast.makeText(this@MainActivity, "¡Captura de Plin lista! Toca 'Guardar mi QR de Plin 💾'", Toast.LENGTH_LONG).show()
+                    } else {
+                        qrTemporalYapeDetectado = textoQrExtraido
+                        qrTemporalYapeImgBase64 = imgBase64
+                        txtPreviaQrDetectado.text = "✅ Captura de QR de YAPE lista.\nAhora toca 'Guardar mi QR de Yape 💾' para activarlo en tu mostrador."
+                        txtPreviaQrDetectado.setTextColor(Color.parseColor("#15803D"))
+                        btnGuardarQrDeYape.visibility = View.VISIBLE
+                        Toast.makeText(this@MainActivity, "¡Captura de Yape lista! Toca 'Guardar mi QR de Yape 💾'", Toast.LENGTH_LONG).show()
+                    }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    Toast.makeText(this@MainActivity, "No se encontró un código QR válido en la imagen. Intenta con una captura más nítida.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, "No se pudo procesar la captura seleccionada.", Toast.LENGTH_LONG).show()
                 }
             }
         }
     }
 
-    private fun guardarQrSeleccionado() {
-        if (qrTemporalDetectado.isEmpty()) {
-            Toast.makeText(this, "Primero selecciona una foto de tu QR", Toast.LENGTH_SHORT).show()
-            return
-        }
+    private fun guardarQrSeleccionado(tipo: String) {
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
         var cod = prefs.getString("codigo_tienda", "") ?: ""
         if (cod.isEmpty()) {
             cod = "TIENDA-YAPE-" + (1000..9999).random()
             prefs.edit().putString("codigo_tienda", cod).apply()
         }
-        prefs.edit().putString("qr_base_yape", qrTemporalDetectado).apply()
 
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val json = JSONObject().apply {
-                    put("accion", "guardar_qr")
-                    put("codigoTienda", cod)
-                    put("qrBase", qrTemporalDetectado)
+        if (tipo == "PLIN") {
+            if (qrTemporalPlinDetectado.isEmpty() && qrTemporalPlinImgBase64.isEmpty()) {
+                Toast.makeText(this, "Primero selecciona una captura de tu QR de Plin", Toast.LENGTH_SHORT).show()
+                return
+            }
+            prefs.edit()
+                .putString("qr_base_plin", qrTemporalPlinDetectado)
+                .putString("qr_img_base64_plin", qrTemporalPlinImgBase64)
+                .apply()
+
+            AlertDialog.Builder(this)
+                .setTitle("¡QR de Plin Guardado con Éxito! 🩵🎉")
+                .setMessage("Tu captura de QR de Plin quedó vinculada junto con Yape.\n\nEn la pestaña Cobro ahora puedes mostrar tanto tu QR de Yape como tu QR de Plin al mismo tiempo.")
+                .setPositiveButton("Listo 🛒", null)
+                .show()
+        } else {
+            if (qrTemporalYapeDetectado.isEmpty() && qrTemporalYapeImgBase64.isEmpty()) {
+                Toast.makeText(this, "Primero selecciona una captura de tu QR de Yape", Toast.LENGTH_SHORT).show()
+                return
+            }
+            prefs.edit()
+                .putString("qr_base_yape", qrTemporalYapeDetectado)
+                .putString("qr_img_base64_yape", qrTemporalYapeImgBase64)
+                .apply()
+
+            if (qrTemporalYapeDetectado.isNotEmpty()) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val json = JSONObject().apply {
+                            put("accion", "guardar_qr")
+                            put("codigoTienda", cod)
+                            put("qrBase", qrTemporalYapeDetectado)
+                        }
+                        val b = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                        client.newCall(Request.Builder().url(SERVIDOR_URL).post(b).build()).execute().close()
+                    } catch (e: Exception) {}
                 }
-                val b = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-                client.newCall(Request.Builder().url(SERVIDOR_URL).post(b).build()).execute().close()
-            } catch (e: Exception) {}
-        }
+            }
 
-        AlertDialog.Builder(this)
-            .setTitle("¡Se creó el ID de su QR correctamente! 🎉")
-            .setMessage("Su código QR de Yape ha quedado vinculado con éxito a su negocio.\n\nID de su QR: $cod\n\nSu caja en YapeAlDía ya está lista para generar cobros dinámicos con monto exacto.")
-            .setPositiveButton("Continuar a Cobrar 🛒") { _, _ -> }
-            .show()
+            AlertDialog.Builder(this)
+                .setTitle("¡QR de Yape Guardado con Éxito! 💜🎉")
+                .setMessage("Tu código QR de Yape quedó vinculado a tu negocio.\n\nEn la pestaña Cobro puedes mostrar tu QR de Yape y también tu QR de Plin.")
+                .setPositiveButton("Listo 🛒", null)
+                .show()
+        }
 
         renderizarVistaQR()
     }
 
     private fun renderizarVistaQR() {
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
-        val qrGuardado = prefs.getString("qr_base_yape", "") ?: ""
-        val codTienda = prefs.getString("codigo_tienda", "") ?: ""
+        val tieneYape = (prefs.getString("qr_base_yape", "") ?: "").isNotEmpty() ||
+            (prefs.getString("qr_img_base64_yape", "") ?: "").isNotEmpty()
+        val tienePlin = (prefs.getString("qr_base_plin", "") ?: "").isNotEmpty() ||
+            (prefs.getString("qr_img_base64_plin", "") ?: "").isNotEmpty()
 
-        if (qrGuardado.isNotEmpty()) {
-            layoutAccionAdjuntarQr.visibility = View.GONE
+        if (tieneYape || tienePlin) {
             layoutEstadoQrGuardado.visibility = View.VISIBLE
-            txtEstadoQrGuardado.text = "✅ QR DE YAPE VINCULADO Y ACTIVO\n\n🔑 ID DE SU QR: $codTienda\n\nTu caja ya genera cobros automáticos con monto exacto."
+            val estadoYape = if (tieneYape) "✅ QR de YAPE: Vinculado y Activo 💜" else "⚪ QR de YAPE: Pendiente de subir"
+            val estadoPlin = if (tienePlin) "✅ QR de PLIN: Vinculado y Activo 🩵" else "⚪ QR de PLIN: Pendiente de subir"
+            txtEstadoQrGuardado.text = "$estadoYape\n$estadoPlin\n\nAmbos funcionan en simultáneo en la pestaña Cobro."
+            if (tieneYape && tienePlin) {
+                layoutAccionAdjuntarQr.visibility = View.GONE
+            } else {
+                layoutAccionAdjuntarQr.visibility = View.VISIBLE
+            }
         } else {
             layoutAccionAdjuntarQr.visibility = View.VISIBLE
             layoutEstadoQrGuardado.visibility = View.GONE
-            btnGuardarQrDeYape.visibility = if (qrTemporalDetectado.isNotEmpty()) View.VISIBLE else View.GONE
         }
+        btnGuardarQrDeYape.visibility = if (qrTemporalYapeDetectado.isNotEmpty() || qrTemporalYapeImgBase64.isNotEmpty()) View.VISIBLE else View.GONE
+        btnGuardarQrDePlin.visibility = if (qrTemporalPlinDetectado.isNotEmpty() || qrTemporalPlinImgBase64.isNotEmpty()) View.VISIBLE else View.GONE
     }
 
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
@@ -1392,8 +1779,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 if (req == REQ_GOOGLE_PICKER_REGISTRO) inCorreoRegistro.setText(acc)
                 else if (req == REQ_GOOGLE_PICKER_LOGIN) inCorreoLoginDueño.setText(acc)
             }
-            if (req == REQ_SELECCIONAR_IMAGEN_QR) {
-                data.data?.let { uri -> procesarImagenQrSeleccionada(uri) }
+            if (req == REQ_SELECCIONAR_IMAGEN_QR_YAPE) {
+                data.data?.let { uri -> procesarImagenQrSeleccionada(uri, "YAPE") }
+            } else if (req == REQ_SELECCIONAR_IMAGEN_QR_PLIN) {
+                data.data?.let { uri -> procesarImagenQrSeleccionada(uri, "PLIN") }
             }
         }
     }
@@ -1840,12 +2229,32 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             }
 
+            var pinMostradoEnFila = false
             val txtInfo = TextView(this).apply {
-                text = "👤 $nombreCaj  •  🔑 PIN: $pinCaj"
+                text = "👤 $nombreCaj  •  🔑 PIN: ••••"
                 textSize = 14f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#334155"))
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+
+            val btnVerPinFila = Button(this).apply {
+                text = "👁️"
+                textSize = 12f
+                background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 10f)
+                setPadding(10, 6, 10, 6)
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    setMargins(4, 0, 4, 0)
+                }
+                setOnClickListener {
+                    pinMostradoEnFila = !pinMostradoEnFila
+                    txtInfo.text = if (pinMostradoEnFila) {
+                        "👤 $nombreCaj  •  🔑 PIN: $pinCaj"
+                    } else {
+                        "👤 $nombreCaj  •  🔑 PIN: ••••"
+                    }
+                    text = if (pinMostradoEnFila) "🙈" else "👁️"
+                }
             }
 
             val btnEditar = Button(this).apply {
@@ -1854,7 +2263,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 background = crearBordeRedondo("#EFF6FF", "#93C5FD", 10f)
                 setPadding(12, 6, 12, 6)
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    setMargins(6, 0, 6, 0)
+                    setMargins(4, 0, 4, 0)
                 }
                 setOnClickListener {
                     mostrarDialogoEditarCajero(prefs, i, nombreCaj, pinCaj)
@@ -1873,6 +2282,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
 
             filaCajero.addView(txtInfo)
+            filaCajero.addView(btnVerPinFila)
             filaCajero.addView(btnEditar)
             filaCajero.addView(btnEliminar)
             layoutListaCajerosAdmin.addView(filaCajero)
@@ -1890,12 +2300,39 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setPadding(50, 24, 50, 12)
         }
         val inNuevoNombre = crearInputFintech(this, "Nombre del Cajero").apply { setText(nombreActual) }
-        val inNuevoPin = crearInputFintech(this, "PIN (4 dígitos)").apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            setText(pinActual)
+        val filaPinEdit = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
+        var verPinEdit = false
+        val inNuevoPin = crearInputFintech(this, "PIN secreto (4 dígitos)").apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            setText(pinActual)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                setMargins(0, 4, 8, 10)
+            }
+        }
+        val btnTogglePinEdit = Button(this).apply {
+            text = "👁️"
+            textSize = 14f
+            background = crearBordeRedondo("#F1F5F9", "#CBD5E1", 12f)
+            setPadding(14, 12, 14, 12)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            setOnClickListener {
+                verPinEdit = !verPinEdit
+                inNuevoPin.inputType = if (verPinEdit) {
+                    android.text.InputType.TYPE_CLASS_NUMBER
+                } else {
+                    android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+                }
+                inNuevoPin.setSelection(inNuevoPin.text.length)
+                text = if (verPinEdit) "🙈" else "👁️"
+            }
+        }
+        filaPinEdit.addView(inNuevoPin)
+        filaPinEdit.addView(btnTogglePinEdit)
         lay.addView(inNuevoNombre)
-        lay.addView(inNuevoPin)
+        lay.addView(filaPinEdit)
 
         AlertDialog.Builder(this)
             .setTitle("✏️ Editar Cajero Autorizado")
@@ -1929,7 +2366,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             client.newCall(Request.Builder().url(SERVIDOR_URL).post(b).build()).execute().close()
                         } catch (e: Exception) {}
                     }
-                    Toast.makeText(this, "✅ Cajero actualizado correctamente", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "✅ Cajero actualizado con PIN oculto", Toast.LENGTH_SHORT).show()
                 }
             }
             .setNegativeButton("Cancelar", null)
