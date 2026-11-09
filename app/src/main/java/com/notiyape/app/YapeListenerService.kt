@@ -426,45 +426,72 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         }
 
         val pkg = sbn.packageName ?: return
-        // Ignorar nuestra propia app y apps de mensajería/redes sociales para evitar falsas alarmas
+        // Ignorar nuestra propia app y apps de mensajería/redes sociales/navegadores para evitar falsas alarmas
         if (pkg == packageName ||
             pkg.contains("whatsapp", ignoreCase = true) ||
             pkg.contains("telegram", ignoreCase = true) ||
             pkg.contains("facebook", ignoreCase = true) ||
             pkg.contains("instagram", ignoreCase = true) ||
+            pkg.contains("tiktok", ignoreCase = true) ||
             pkg.contains("messaging", ignoreCase = true) ||
             pkg.contains("mms", ignoreCase = true) ||
-            pkg.contains("gmail", ignoreCase = true)
+            pkg.contains("gmail", ignoreCase = true) ||
+            pkg.contains("chrome", ignoreCase = true)
         ) {
             return
         }
-
-        val esYape = (pkg == "com.bcp.innovacxion.yapeapp")
-        val esInterbank = (pkg == "pe.com.interbank.mobilebanking")
-        val esBBVA = (pkg == "com.bbva.bbvacontigo" || pkg == "com.bbva.nxt_peru")
-        val esScotiabank = (pkg == "com.scotiabank.peru.pe" || pkg == "pe.com.scotiabank.blpm.android.client")
-        val esBanbif = (pkg == "com.banbif.bifmovil")
-        val esOtraEntidadPlin = (
-            pkg == "pe.com.cajaarequipa.movil" ||
-            pkg == "pe.com.izipay.izipayya" ||
-            pkg == "pe.com.cajasullana.movil" ||
-            pkg.contains("plin", ignoreCase = true)
-        )
 
         val extras = sbn.notification.extras
         val title = extras.getCharSequence("android.title")?.toString()?.trim() ?: ""
         val text = extras.getCharSequence("android.text")?.toString()?.trim() ?: ""
         val bigText = extras.getCharSequence("android.bigText")?.toString()?.trim() ?: ""
+        val subText = extras.getCharSequence("android.subText")?.toString()?.trim() ?: ""
 
         // Unificamos título y texto para que tanto Yape como Plin (Interbank, BBVA, Scotiabank, etc.) se reconozcan siempre
         val cuerpoPrincipal = if (bigText.isNotEmpty() && bigText.length >= text.length) bigText else text
-        val textoCompleto = if (title.isNotEmpty() && !cuerpoPrincipal.contains(title, ignoreCase = true)) {
-            "$title. $cuerpoPrincipal"
+        val baseTexto = if (title.isNotEmpty() && !cuerpoPrincipal.contains(title, ignoreCase = true)) {
+            "$title $cuerpoPrincipal"
         } else {
             cuerpoPrincipal
         }.trim()
+        val textoCompleto = if (subText.isNotEmpty() && !baseTexto.contains(subText, ignoreCase = true)) {
+            "$subText $baseTexto"
+        } else {
+            baseTexto
+        }.trim()
 
         if (textoCompleto.isEmpty()) return
+
+        val esYape = (pkg == "com.bcp.innovacxion.yapeapp" || pkg.contains("yape", ignoreCase = true))
+        val esInterbank = (
+            pkg == "pe.com.interbank.mobilebanking" ||
+            pkg.contains("interbank", ignoreCase = true) ||
+            textoCompleto.contains("Interbank", ignoreCase = true)
+        )
+        val esBBVA = (
+            pkg == "com.bbva.bbvacontigo" ||
+            pkg == "com.bbva.nxt_peru" ||
+            pkg.contains("bbva", ignoreCase = true) ||
+            textoCompleto.contains("BBVA", ignoreCase = true)
+        )
+        val esScotiabank = (
+            pkg == "com.scotiabank.peru.pe" ||
+            pkg == "pe.com.scotiabank.blpm.android.client" ||
+            pkg.contains("scotiabank", ignoreCase = true) ||
+            textoCompleto.contains("Scotiabank", ignoreCase = true)
+        )
+        val esBanbif = (
+            pkg == "com.banbif.bifmovil" ||
+            pkg.contains("banbif", ignoreCase = true) ||
+            textoCompleto.contains("BanBif", ignoreCase = true)
+        )
+        val esOtraEntidadPlin = (
+            pkg == "pe.com.cajaarequipa.movil" ||
+            pkg == "pe.com.izipay.izipayya" ||
+            pkg == "pe.com.cajasullana.movil" ||
+            pkg.contains("plin", ignoreCase = true) ||
+            textoCompleto.contains(Regex("(plinead|pinead|pline[oó]|recibiste un plin|abono plin)", RegexOption.IGNORE_CASE))
+        )
 
         if (esYape || esInterbank || esBBVA || esScotiabank || esBanbif || esOtraEntidadPlin) {
             val metodo = when {
@@ -512,17 +539,17 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         }
 
         // =========================================================================
-        // ESCUDO 2: VERBO DE PAGO OBLIGATORIO (YAPE Y PLIN EN SIMULTÁNEO)
+        // ESCUDO 2: VERBO DE PAGO OBLIGATORIO (SOPORTA 'TE HA PLINEADO', 'TE HA PINEADO', ETC.)
         // =========================================================================
         val tieneVerboPago = texto.contains(
-            Regex("(te envi|te mand|transfiri|recibiste un pago|pago de|te yape|yapeó|yapeo|te pline|plineó|plineo|recibiste un yape|recibiste un plin|envi[oó] un plin|envi[oó] por plin|abono plin|recibiste)", RegexOption.IGNORE_CASE)
+            Regex("(te ha plinead|te ha pinead|ha plinead|ha pinead|plinead[oa]|pinead[oa]|te pline|pline[oó]|plineo|te ha yapead|ha yapead|yapead[oa]|te yape|yape[oó]|yapeo|te ha enviad|ha enviad|te envi|te ha mandad|te mand|te ha transferid|transfiri|recibiste un pago|pago de|recibiste un yape|recibiste un plin|envi[oó] un plin|envi[oó] por plin|abono plin|recibiste)", RegexOption.IGNORE_CASE)
         )
         if (!tieneVerboPago) {
             return
         }
 
         // =========================================================================
-        // 3. EXTRAER MONTO EN SOLES (Ej: S/ 15.00, S/. 15, S/15,50)
+        // 3. EXTRAER MONTO EN SOLES (Ej: S/ 15.00, S/. 15, S/.1.00, S/15,50)
         // =========================================================================
         val regexMonto = Regex("""S/\.?\s*([\d]+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
         val matchMonto = regexMonto.find(texto) ?: return
@@ -531,15 +558,15 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
         if (montoDouble <= 0.0) return
 
         // =========================================================================
-        // 4. EXTRAER REMITENTE LIMPIO (Soporta formatos Yape y Plin de todos los bancos)
+        // 4. EXTRAER REMITENTE LIMPIO (Soporta 'Interbank Rosa ... te ha plineado / pineado')
         // =========================================================================
         var remitente = "Cliente"
-        val regexVerbos = Regex("(te envi[oó]|transfiri[oó]|te mand[oó]|recibiste un pago de|pago de|te yape[oó]|yape[oó]|te pline[oó]|pline[oó])", RegexOption.IGNORE_CASE)
+        val regexVerbos = Regex("(te ha plinead[oa]|te ha pinead[oa]|ha plinead[oa]|ha pinead[oa]|te pline[oó]|plinead[oa]|pinead[oa]|pline[oó]|te ha yapead[oa]|ha yapead[oa]|te yape[oó]|yapead[oa]|yape[oó]|te ha enviad[oa]|ha enviad[oa]|te envi[oó]|te ha transferid[oa]|transfiri[oó]|te ha mandad[oa]|te mand[oó]|recibiste un pago de|recibiste un plin de|recibiste un yape de|pago de)", RegexOption.IGNORE_CASE)
 
         if (texto.contains(regexVerbos)) {
             val antes = texto.split(regexVerbos)[0]
             val posible = antes.replace(
-                Regex("(¡|!|Confirmación de Pago\\.?|Confirmacion de Pago\\.?|Te llegó un Yape|Recibiste un Plin|Yape|Plin|Interbank|BBVA|Scotiabank|BanBif|Pago|Notificación)", RegexOption.IGNORE_CASE),
+                Regex("(¡|!|Confirmación de Pago\\.?|Confirmacion de Pago\\.?|Te llegó un Yape|Recibiste un Plin|Yape\\.?|Plin\\.?|Interbank\\.?|BBVA\\.?|Scotiabank\\.?|BanBif\\.?|Pago\\.?|Notificación\\.?|:|-)", RegexOption.IGNORE_CASE),
                 ""
             ).trim()
             if (posible.isNotEmpty() && posible.length >= 3) {
