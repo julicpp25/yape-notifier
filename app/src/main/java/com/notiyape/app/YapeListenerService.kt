@@ -364,7 +364,7 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             }
 
             val notif = builder
-                .setSmallIcon(android.R.drawable.stat_sys_Upload_done)
+                .setSmallIcon(android.R.drawable.stat_notify_chat)
                 .setContentTitle("💰 ¡$metodo recibido: S/ $monto!")
                 .setContentText("De: $remitente • Registrado en YapeAlDía")
                 .setCategory(Notification.CATEGORY_ALARM)
