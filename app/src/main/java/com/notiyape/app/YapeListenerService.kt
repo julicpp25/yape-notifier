@@ -548,14 +548,19 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                     startForeground(
                         777,
                         notif,
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
                     )
-                } catch (e: Exception) {
-                    startForeground(777, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-                }
+                } catch (e: Exception) {}
             } else {
                 startForeground(777, notif)
             }
+        } catch (e: Exception) {}
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        super.onTimeout(startId, fgsType)
+        try {
+            stopForeground(STOP_FOREGROUND_DETACH)
         } catch (e: Exception) {}
     }
 

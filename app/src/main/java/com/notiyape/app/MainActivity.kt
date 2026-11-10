@@ -206,6 +206,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         rootLayout = FrameLayout(this).apply {
             setBackgroundColor(Color.parseColor(if (esModoOscuro) "#0B0F19" else "#F8FAFC"))
+            fitsSystemWindows = true
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                setOnApplyWindowInsetsListener { view, insets ->
+                    val sysBars = insets.getInsets(android.view.WindowInsets.Type.systemBars())
+                    view.setPadding(sysBars.left, sysBars.top, sysBars.right, sysBars.bottom)
+                    insets
+                }
+            }
         }
 
         bannerSinInternet = TextView(this).apply {
@@ -1046,7 +1054,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         tabConfiguracion = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val cardCfg = crearTarjetaFintech(this)
         val rowBdg = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        badgeLectorStatus = crearPildoraEstado("Lector Yape/Plin") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+        badgeLectorStatus = crearPildoraEstado("Lector Yape/Plin") { mostrarDivulgacionProminenteNotificaciones() }
         badgeBateriaStatus = crearPildoraEstado("Segundo Plano 24/7") { solicitarSinRestriccionesBateria() }
         badgeNotifStatus = crearPildoraEstado("Alertas de Cobro") { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101) }
         badgeMarcaStatus = crearPildoraEstado("Inicio Segundo Plano (${obtenerNombreMarcaDetectada()})") { abrirAjusteSegundoPlanoMultimarca() }
@@ -1779,10 +1787,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                Toast.makeText(
+                    this,
+                    "🔋 Busca 'NotiAlDía' y selecciona 'No optimizar' o 'Sin restricciones' para funcionamiento 24/7.",
+                    Toast.LENGTH_LONG
+                ).show()
                 try {
-                    startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply { data = Uri.parse("package:$packageName") })
-                } catch (e: Exception) {
                     startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                } catch (e: Exception) {
+                    try {
+                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.parse("package:$packageName")
+                        })
+                    } catch (ex: Exception) {}
                 }
             } else {
                 Toast.makeText(this, "✅ Batería de Android optimizada para 24/7.", Toast.LENGTH_SHORT).show()

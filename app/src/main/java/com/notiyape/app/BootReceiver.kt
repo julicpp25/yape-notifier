@@ -9,8 +9,8 @@ import android.service.notification.NotificationListenerService
 
 /**
  * Auto-arranque al encender o reiniciar el celular:
- * Garantiza que el Escudo 24/7 de YapeAlDía despierte automáticamente apenas prenda el teléfono
- * sin necesidad de abrir la aplicación manualmente.
+ * Garantiza que el Escudo 24/7 de NotiAlDía se reconecte automáticamente apenas prenda el teléfono
+ * cumpliendo con las políticas de segundo plano de Android 15 y Android 16 (API 36).
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
@@ -23,7 +23,7 @@ class BootReceiver : BroadcastReceiver() {
             val tiendaActiva = prefs.getBoolean("tienda_registrada", false) || prefs.getBoolean("cajero_logueado", false)
             if (!tiendaActiva) return
 
-            // 1. Solicitar reconexión automática del NotificationListenerService al sistema Android
+            // 1. Solicitar reconexión oficial del NotificationListenerService al sistema Android (Permitido en Android 15/16)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 try {
                     NotificationListenerService.requestRebind(
@@ -32,15 +32,17 @@ class BootReceiver : BroadcastReceiver() {
                 } catch (e: Exception) {}
             }
 
-            // 2. Levantar el servicio Guardia 24/7 en primer plano
-            try {
-                val srvIntent = Intent(context, YapeListenerService::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(srvIntent)
-                } else {
-                    context.startService(srvIntent)
-                }
-            } catch (e: Exception) {}
+            // 2. En versiones anteriores a Android 15 (API < 35) también levantamos startForegroundService directamente
+            if (Build.VERSION.SDK_INT < 35) {
+                try {
+                    val srvIntent = Intent(context, YapeListenerService::class.java)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(srvIntent)
+                    } else {
+                        context.startService(srvIntent)
+                    }
+                } catch (e: Exception) {}
+            }
         }
     }
 }
