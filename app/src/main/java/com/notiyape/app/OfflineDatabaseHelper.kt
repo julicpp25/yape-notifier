@@ -173,4 +173,12 @@ class OfflineDatabaseHelper(context: Context) :
         }
         return array
     }
+
+    @Synchronized
+    fun limpiarTodoLocal() {
+        try {
+            writableDatabase.delete(TABLE_COBROS, null, null)
+        } catch (e: Exception) {}
+    }
 }
+

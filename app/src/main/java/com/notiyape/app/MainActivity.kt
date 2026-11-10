@@ -252,9 +252,26 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val btnCajero = crearBotonSecundario(this, "🛒 Soy Cajero (Entrar al Punto de Venta)") {
             mostrarSeccion(layoutLoginCajero)
         }
+        val txtAvisoLegalPortada = TextView(this).apply {
+            text = "ℹ️ Herramienta independiente de anuncio por voz y control de caja para comercios. YapeAlDía no es una entidad bancaria, no retiene dinero y no tiene afiliación oficial con BCP (Yape) ni Interbank/BBVA/Scotiabank (Plin)."
+            textSize = 11f
+            setTextColor(Color.parseColor("#64748B"))
+            gravity = Gravity.CENTER
+            setPadding(8, 14, 8, 4)
+        }
+        val btnPoliticaPortada = Button(this).apply {
+            text = "📄 Política de Privacidad y Seguridad de Datos"
+            setTextColor(Color.parseColor("#2563EB"))
+            setBackgroundColor(Color.TRANSPARENT)
+            textSize = 12f
+            isAllCaps = false
+            setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(URL_POLITICA_PRIVACIDAD))) }
+        }
         cardPortada.addView(imgBanner)
         cardPortada.addView(btnDueño)
         cardPortada.addView(btnCajero)
+        cardPortada.addView(txtAvisoLegalPortada)
+        cardPortada.addView(btnPoliticaPortada)
         layoutPortada.addView(cardPortada)
 
         // 2. REGISTRO DUEÑO
@@ -1062,19 +1079,38 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
         }
         val btnTestSound = crearBotonSecundario(this, "🔊 Probar Sonido de Caja") { probarAudioCaja() }
+        val btnSimularCobroDemo = crearBotonSecundario(this, "🧪 Simular Cobro de Prueba (S/ 10.00 - Demo)") {
+            simularCobroDemostracionCaja()
+        }
         val btnWspHelp = crearBotonSecundario(this, "💬 Soporte por WhatsApp") {
             val cod = prefs.getString("codigo_tienda", ""); val nom = prefs.getString("nombre_tienda", "")
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com/send?phone=$NUMERO_SOPORTE_WSP&text=" + Uri.encode("Hola Soporte YapeAlDía, negocio $nom ($cod)"))))
         }
         val btnPolitica = Button(this).apply {
-            text = "📄 Política de Privacidad y Seguridad"; setTextColor(Color.parseColor("#2563EB")); setBackgroundColor(Color.TRANSPARENT); textSize = 13f; setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(URL_POLITICA_PRIVACIDAD))) }
+            text = "📄 Política de Privacidad y Seguridad"; setTextColor(Color.parseColor("#2563EB")); setBackgroundColor(Color.TRANSPARENT); textSize = 13f; isAllCaps = false; setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(URL_POLITICA_PRIVACIDAD))) }
+        }
+        val btnEliminarCuenta = Button(this).apply {
+            text = "🗑️ Eliminar mi Cuenta y Datos del Negocio"
+            setTextColor(Color.parseColor("#B91C1C"))
+            setBackgroundColor(Color.TRANSPARENT)
+            textSize = 12.5f
+            isAllCaps = false
+            setTypeface(null, Typeface.BOLD)
+            setOnClickListener { confirmarEliminacionDeCuenta(prefs) }
         }
         val btnLogout = Button(this).apply {
             text = "CERRAR SESIÓN"; setTextColor(Color.parseColor("#DC2626")); setBackgroundColor(Color.TRANSPARENT); textSize = 14f; setTypeface(null, Typeface.BOLD)
             setOnClickListener { jobSincronizador?.cancel(); prefs.edit().putBoolean("cajero_logueado", false).apply(); mostrarSeccion(layoutPortada) }
         }
+        val txtAvisoLegalAjustes = TextView(this).apply {
+            text = "ℹ️ YapeAlDía es una utilidad independiente de lectura por voz de notificaciones para comercios. No procesa pagos bancarios ni está afiliada oficialmente a BCP (Yape) ni Plin."
+            textSize = 11f
+            setTextColor(Color.parseColor("#64748B"))
+            gravity = Gravity.CENTER
+            setPadding(8, 10, 8, 4)
+        }
         cardCfg.addView(TextView(this).apply { text = "ESTADO DEL SISTEMA"; textSize = 15f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
-        cardCfg.addView(rowBdg); cardCfg.addView(switchDecirNombreVoz); cardCfg.addView(btnLetraGrandeAjustes); cardCfg.addView(btnModoOscuroAjustes); cardCfg.addView(btnPinD); cardCfg.addView(btnSheet); cardCfg.addView(btnTestSound); cardCfg.addView(btnWspHelp); cardCfg.addView(btnPolitica); cardCfg.addView(btnLogout)
+        cardCfg.addView(rowBdg); cardCfg.addView(switchDecirNombreVoz); cardCfg.addView(btnLetraGrandeAjustes); cardCfg.addView(btnModoOscuroAjustes); cardCfg.addView(btnPinD); cardCfg.addView(btnSheet); cardCfg.addView(btnTestSound); cardCfg.addView(btnSimularCobroDemo); cardCfg.addView(btnWspHelp); cardCfg.addView(btnPolitica); cardCfg.addView(btnEliminarCuenta); cardCfg.addView(btnLogout); cardCfg.addView(txtAvisoLegalAjustes)
         tabConfiguracion.addView(cardCfg)
 
         containerTabs.addView(tabCajaPOS); containerTabs.addView(tabCajeros); containerTabs.addView(tabConfiguracion)
@@ -1428,6 +1464,87 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 motorVozCajero?.speak("Prueba de audio correcta. YapeAlDía lista para cobrar.", TextToSpeech.QUEUE_FLUSH, null, "TEST_TTS")
             }
         }
+    }
+
+    private fun simularCobroDemostracionCaja() {
+        val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        val cod = prefs.getString("codigo_tienda", "DEMO-100") ?: "DEMO-100"
+        val ahora = Date()
+        val fechaStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(ahora)
+        val horaStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(ahora)
+        val ts = System.currentTimeMillis()
+        val nombreDemo = "Cliente Demo (Yape)"
+        val montoDemo = "10.00"
+
+        try {
+            val dbHelper = OfflineDatabaseHelper(this)
+            dbHelper.insertarCobroLocal(
+                codigoTienda = cod,
+                nombre = nombreDemo,
+                monto = montoDemo,
+                metodo = "Yape",
+                cajero = "Caja Principal",
+                fecha = fechaStr,
+                hora = horaStr,
+                timestamp = ts,
+                sincronizado = true
+            )
+            prefs.edit()
+                .putString("ultimo_cobro_resumen", "$nombreDemo|$montoDemo|Yape|$horaStr")
+                .putLong("ultimo_cobro_local_ms", ts)
+                .apply()
+            val localArr = dbHelper.obtenerHistorialComoJsonArray(50)
+            actualizarListaCaja(localArr)
+        } catch (e: Exception) {}
+
+        reproducirTimbreYVozLocal(
+            monto = montoDemo,
+            nombreCliente = "Cliente Demo",
+            decirNombre = prefs.getBoolean("decir_nombre_voz", true),
+            montoRecibido = 10.0
+        )
+        seleccionarPestaña(1)
+        Toast.makeText(this, "🧪 Cobro de prueba (S/ 10.00) anunciado y registrado en Caja", Toast.LENGTH_LONG).show()
+    }
+
+    private fun confirmarEliminacionDeCuenta(prefs: android.content.SharedPreferences) {
+        val nom = prefs.getString("nombre_tienda", "Mi Negocio") ?: "Mi Negocio"
+        val cor = prefs.getString("correo_tienda", "") ?: ""
+        val cod = prefs.getString("codigo_tienda", "") ?: ""
+
+        AlertDialog.Builder(this)
+            .setTitle("🗑️ Eliminar Cuenta y Datos")
+            .setMessage("¿Estás seguro de eliminar permanentemente la cuenta del negocio '$nom' ($cor) y borrar todos los datos locales de este dispositivo?\n\nEsta acción es inmediata e irreversible.")
+            .setPositiveButton("Sí, Eliminar Permanentemente") { _, _ ->
+                jobSincronizador?.cancel()
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        if (cod.isNotEmpty() || cor.isNotEmpty()) {
+                            val json = JSONObject().apply {
+                                put("accion", "eliminar_cuenta")
+                                put("codigoTienda", cod)
+                                put("correo", cor)
+                            }
+                            val b = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                            client.newCall(Request.Builder().url(SERVIDOR_URL).post(b).build()).execute().close()
+                        }
+                    } catch (e: Exception) {}
+                }
+                try {
+                    if (cod.isNotEmpty()) {
+                        val topic = "tienda_" + cod.replace(Regex("[^a-zA-Z0-9-_.~%]"), "_")
+                        FirebaseMessaging.getInstance().unsubscribeFromTopic(topic)
+                    }
+                    OfflineDatabaseHelper(this).limpiarTodoLocal()
+                } catch (e: Exception) {}
+
+                prefs.edit().clear().apply()
+                esSesionDueño = false
+                mostrarSeccion(layoutPortada)
+                Toast.makeText(this, "✅ Tu cuenta y todos los datos asociados han sido eliminados.", Toast.LENGTH_LONG).show()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
     private fun confirmarCierreDeTurno() {
