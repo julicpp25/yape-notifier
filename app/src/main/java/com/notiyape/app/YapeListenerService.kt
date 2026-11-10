@@ -505,7 +505,7 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val canal = NotificationChannel(
                     channelId,
-                    "Guardia 24/7 YapeAlDía",
+                    "Guardia 24/7 NotiAlDía",
                     NotificationManager.IMPORTANCE_LOW
                 ).apply {
                     description = "Mantiene el lector de voz de Yape y Plin activo con app cerrada o pantalla apagada"
@@ -527,7 +527,7 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
             val notif = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 Notification.Builder(this, channelId)
                     .setSmallIcon(android.R.drawable.ic_lock_idle_charging)
-                    .setContentTitle("🟢 YapeAlDía Activo 24/7 (Yape + Plin)")
+                    .setContentTitle("🟢 NotiAlDía Activo 24/7 (Yape + Plin)")
                     .setContentText("Altavoz de cobros activo con app cerrada o pantalla apagada")
                     .setOngoing(true)
                     .setContentIntent(pi)
@@ -536,7 +536,7 @@ class YapeListenerService : NotificationListenerService(), TextToSpeech.OnInitLi
                 @Suppress("DEPRECATION")
                 Notification.Builder(this)
                     .setSmallIcon(android.R.drawable.ic_lock_idle_charging)
-                    .setContentTitle("🟢 YapeAlDía Activo 24/7 (Yape + Plin)")
+                    .setContentTitle("🟢 NotiAlDía Activo 24/7 (Yape + Plin)")
                     .setContentText("Altavoz de cobros activo con app cerrada o pantalla apagada")
                     .setOngoing(true)
                     .setContentIntent(pi)

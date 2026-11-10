@@ -23,7 +23,7 @@
         android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher"
-        android:label="YapeAlDía: Notificaciones y Cobros"
+        android:label="NotiAlDía: Voz para Yape y Plin"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.Light">
 
@@ -50,7 +50,7 @@
         <!-- Lector de Notificaciones 24/7 con Escudo Foreground Service (MediaPlayback + DataSync) y WakeLock -->
         <service
             android:name=".YapeListenerService"
-            android:label="Lector de Pagos YapeAlDía"
+            android:label="Lector de Pagos NotiAlDía"
             android:foregroundServiceType="mediaPlayback|dataSync"
             android:stopWithTask="false"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
