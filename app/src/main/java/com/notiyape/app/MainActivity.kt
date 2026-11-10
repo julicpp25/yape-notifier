@@ -12,6 +12,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
@@ -123,6 +124,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var ultimoArrayCobrosCache = JSONArray()
     private var fechaSeleccionadaFiltro = ""
     private var esModoOscuro = false
+    private var esLetraGrande = false
+
+    // CANDADOS ANTI-DOBLE CLIC (EVITA CREAR 2 VECES EL MISMO NEGOCIO O CAJERO)
+    private var procesandoRegistroTienda = false
+    private var codigoPendienteRegistro = ""
+    private var claveIntentoRegistro = ""
+    private var procesandoLoginDueno = false
+    private var procesandoLoginCajero = false
+    private var procesandoCrearCajero = false
 
     // DIAGNÓSTICO Y CONFIG
     private lateinit var badgeLectorStatus: TextView
@@ -136,6 +146,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var inCorreoLoginDueño: EditText
     private lateinit var layoutListaCajerosAdmin: LinearLayout
     private lateinit var btnModoOscuroAjustes: Button
+    private lateinit var btnLetraGrandeAjustes: Button
 
     // QR DE YAPE Y PLIN EN SIMULTÁNEO
     private var qrTemporalYapeDetectado: String = ""
@@ -163,11 +174,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private var esSesionDueño = false
 
+    override fun attachBaseContext(newBase: Context) {
+        val prefs = newBase.getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
+        val letraGrande = prefs.getBoolean("modo_letra_grande", false)
+        val config = Configuration(newBase.resources.configuration)
+        config.fontScale = if (letraGrande) 1.35f else 1.0f
+        val ctxEscalado = newBase.createConfigurationContext(config)
+        super.attachBaseContext(ctxEscalado)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val prefs = getSharedPreferences("YapePrefs", Context.MODE_PRIVATE)
         esModoOscuro = prefs.getBoolean("modo_oscuro", false)
+        esLetraGrande = prefs.getBoolean("modo_letra_grande", false)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -249,7 +270,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         val inP1 = crearInputFintech(this, "Crea tu PIN (4 dígitos)").apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD }
         val inP2 = crearInputFintech(this, "Confirmar PIN (4 dígitos)").apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD }
-        val btnCrear = crearBotonPrimario(this, "Crear mi Negocio 🚀") {
+        lateinit var btnCrear: Button
+        btnCrear = crearBotonPrimario(this, "Crear mi Negocio 🚀") {
+            if (procesandoRegistroTienda) {
+                Toast.makeText(this, "⏳ Ya estamos creando tu negocio, espera un momento...", Toast.LENGTH_SHORT).show()
+                return@crearBotonPrimario
+            }
             val nom = inNom.text.toString().trim()
             val cor = inCorreoRegistro.text.toString().trim()
             val p1 = inP1.text.toString().trim()
@@ -258,7 +284,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 Toast.makeText(this, "Verifica los datos y que los PIN coincidan", Toast.LENGTH_SHORT).show()
                 return@crearBotonPrimario
             }
-            val cod = nom.replace(" ", "").take(5).uppercase() + "-" + (100..999).random()
+
+            // Candado Anti-Doble Clic inmediato + reutilización de código si es el mismo intento
+            procesandoRegistroTienda = true
+            btnCrear.isEnabled = false
+            btnCrear.text = "⏳ Creando tu negocio, espera..."
+
+            val claveActual = "${nom.lowercase(Locale.ROOT)}|${cor.lowercase(Locale.ROOT)}"
+            if (claveActual != claveIntentoRegistro || codigoPendienteRegistro.isEmpty()) {
+                claveIntentoRegistro = claveActual
+                codigoPendienteRegistro = nom.replace(" ", "").take(5).uppercase(Locale.ROOT) + "-" + (100..999).random()
+            }
+            val cod = codigoPendienteRegistro
+
             CoroutineScope(Dispatchers.IO).launch {
                 try {
                     val json = JSONObject().apply {
@@ -285,11 +323,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             .putBoolean("cajero_logueado", false)
                             .apply()
                         runOnUiThread {
+                            procesandoRegistroTienda = false
+                            btnCrear.isEnabled = true
+                            btnCrear.text = "Crear mi Negocio 🚀"
                             esSesionDueño = true
                             mostrarSeccion(layoutBienvenida)
                         }
                     } else {
                         runOnUiThread {
+                            procesandoRegistroTienda = false
+                            btnCrear.isEnabled = true
+                            btnCrear.text = "Crear mi Negocio 🚀"
                             AlertDialog.Builder(this@MainActivity).setTitle("Aviso").setMessage(resJson.optString("mensaje"))
                                 .setPositiveButton("Iniciar Sesión") { _, _ ->
                                     inCorreoLoginDueño.setText(cor)
@@ -297,7 +341,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                                 }.setNegativeButton("Cerrar", null).show()
                         }
                     }
-                } catch (e: Exception) {}
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        procesandoRegistroTienda = false
+                        btnCrear.isEnabled = true
+                        btnCrear.text = "Crear mi Negocio 🚀"
+                        Toast.makeText(this@MainActivity, "Error de conexión. Intenta nuevamente.", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         }
         val btnLinkLogin = Button(this).apply {
@@ -322,9 +373,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             } catch (e: Exception) {}
         }
         val inPinLogD = crearInputFintech(this, "PIN (4 dígitos)").apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD }
-        val btnEntrarDueño = crearBotonPrimario(this, "Ingresar a mi Negocio 🚀") {
+        lateinit var btnEntrarDueño: Button
+        btnEntrarDueño = crearBotonPrimario(this, "Ingresar a mi Negocio 🚀") {
+            if (procesandoLoginDueno) return@crearBotonPrimario
             val cor = inCorreoLoginDueño.text.toString().trim()
             val pin = inPinLogD.text.toString().trim()
+            if (cor.isEmpty() || pin.isEmpty()) {
+                Toast.makeText(this, "Ingresa tu correo y PIN", Toast.LENGTH_SHORT).show()
+                return@crearBotonPrimario
+            }
+            procesandoLoginDueno = true
+            btnEntrarDueño.isEnabled = false
+            btnEntrarDueño.text = "⏳ Verificando cuenta..."
             CoroutineScope(Dispatchers.IO).launch {
                 try {
                     val json = JSONObject().apply {
@@ -352,13 +412,28 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             .putBoolean("cajero_logueado", false)
                             .apply()
                         runOnUiThread {
+                            procesandoLoginDueno = false
+                            btnEntrarDueño.isEnabled = true
+                            btnEntrarDueño.text = "Ingresar a mi Negocio 🚀"
                             esSesionDueño = true
                             verificarAsistentePermisosOEntrar()
                         }
                     } else {
-                        runOnUiThread { Toast.makeText(this@MainActivity, resJson.optString("mensaje"), Toast.LENGTH_SHORT).show() }
+                        runOnUiThread {
+                            procesandoLoginDueno = false
+                            btnEntrarDueño.isEnabled = true
+                            btnEntrarDueño.text = "Ingresar a mi Negocio 🚀"
+                            Toast.makeText(this@MainActivity, resJson.optString("mensaje"), Toast.LENGTH_SHORT).show()
+                        }
                     }
-                } catch (e: Exception) {}
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        procesandoLoginDueno = false
+                        btnEntrarDueño.isEnabled = true
+                        btnEntrarDueño.text = "Ingresar a mi Negocio 🚀"
+                        Toast.makeText(this@MainActivity, "Error de conexión. Intenta de nuevo.", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         }
         val btnOlvido = Button(this).apply {
@@ -381,6 +456,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val inNomC = crearInputFintech(this, "Tu Nombre (Ej: Carlos)")
         val inPinC = crearInputFintech(this, "PIN").apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD }
         val btnEntrarCaja = crearBotonPrimario(this, "Iniciar Turno de Caja 🚀") {
+            if (procesandoLoginCajero) {
+                Toast.makeText(this, "⏳ Conectando con la caja, espera un momento...", Toast.LENGTH_SHORT).show()
+                return@crearBotonPrimario
+            }
             val cod = inCodC.text.toString().trim()
             val caj = inNomC.text.toString().trim()
             val pin = inPinC.text.toString().trim()
@@ -484,8 +563,29 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             }
         }
+        val btnLetraGrandeCaja = Button(this).apply {
+            text = if (esLetraGrande) "🔍 A+ ON" else "🔍 A+"
+            textSize = 11f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(if (esLetraGrande) Color.WHITE else Color.parseColor(COLOR_PRIMARY))
+            background = crearBordeRedondo(if (esLetraGrande) COLOR_PRIMARY else "#F3E8F7", "#D8B4E2", 12f)
+            setPadding(12, 8, 12, 8)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(4, 0, 4, 0)
+            }
+            setOnClickListener {
+                esLetraGrande = !esLetraGrande
+                prefs.edit().putBoolean("modo_letra_grande", esLetraGrande).putInt("restaurar_pestaña", 1).apply()
+                Toast.makeText(
+                    this@MainActivity,
+                    if (esLetraGrande) "👓 Modo Letra Grande activado (Especial para vista cansada)" else "🔤 Tamaño de letra normal activado",
+                    Toast.LENGTH_SHORT
+                ).show()
+                recreate()
+            }
+        }
         val btnSalirCaj = Button(this).apply {
-            text = "CERRAR SESIÓN"
+            text = "SALIR"
             textSize = 10f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.WHITE)
@@ -493,7 +593,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setPadding(14, 8, 14, 8)
             setOnClickListener { confirmarCierreDeTurno() }
         }
-        barraSubCaja.addView(txtInfoCajero); barraSubCaja.addView(switchVozCaja); barraSubCaja.addView(btnKeepScreen); barraSubCaja.addView(btnSalirCaj)
+        barraSubCaja.addView(txtInfoCajero); barraSubCaja.addView(switchVozCaja); barraSubCaja.addView(btnLetraGrandeCaja); barraSubCaja.addView(btnKeepScreen); barraSubCaja.addView(btnSalirCaj)
 
         // Selector de Modo de Frases de Voz (💼 Motivadoras vs 😎 De Barrio según Monto - 120 frases)
         val filaModosFrase = LinearLayout(this).apply {
@@ -799,17 +899,35 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         filaPinNuevoCaj.addView(btnVerPinNuevo)
 
         layoutListaCajerosAdmin = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val btnSaveCaj = crearBotonPrimario(this, "➕ Crear Cajero Nuevo") {
+        lateinit var btnSaveCaj: Button
+        btnSaveCaj = crearBotonPrimario(this, "➕ Crear Cajero Nuevo") {
+            if (procesandoCrearCajero) return@crearBotonPrimario
             val n = inNCaj.text.toString().trim()
             val p = inPCaj.text.toString().trim()
             val cod = prefs.getString("codigo_tienda", "") ?: ""
             if (n.isNotEmpty() && p.length >= 4) {
+                // Evitar duplicar si el cajero con ese mismo nombre ya existe en la lista
+                val arrExistente = JSONArray(prefs.getString("lista_cajeros", "[]") ?: "[]")
+                for (idx in 0 until arrExistente.length()) {
+                    if (arrExistente.getJSONObject(idx).optString("nombre", "").equals(n, ignoreCase = true)) {
+                        Toast.makeText(this, "⚠️ Ya existe un cajero llamado '$n'", Toast.LENGTH_SHORT).show()
+                        return@crearBotonPrimario
+                    }
+                }
+                procesandoCrearCajero = true
+                btnSaveCaj.isEnabled = false
+                btnSaveCaj.text = "⏳ Guardando cajero..."
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
                         val json = JSONObject().apply { put("accion", "crear_cajero"); put("codigoTienda", cod); put("nombreCajero", n); put("pinCajero", p) }
                         val b = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
                         client.newCall(Request.Builder().url(SERVIDOR_URL).post(b).build()).execute().close()
                     } catch (e: Exception) {}
+                    withContext(Dispatchers.Main) {
+                        procesandoCrearCajero = false
+                        btnSaveCaj.isEnabled = true
+                        btnSaveCaj.text = "➕ Crear Cajero Nuevo"
+                    }
                 }
                 agregarCajeroLocal(prefs, n, p)
                 inNCaj.setText("")
@@ -914,6 +1032,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             prefs.edit().putBoolean("modo_oscuro", esModoOscuro).putInt("restaurar_pestaña", 3).apply()
             recreate()
         }
+        btnLetraGrandeAjustes = crearBotonSecundario(
+            this,
+            if (esLetraGrande) "🔤 Volver a Letra Normal" else "👓 Activar Modo Letra Grande (Adulto Mayor / Vista Cansada)"
+        ) {
+            esLetraGrande = !esLetraGrande
+            prefs.edit().putBoolean("modo_letra_grande", esLetraGrande).putInt("restaurar_pestaña", 3).apply()
+            Toast.makeText(
+                this@MainActivity,
+                if (esLetraGrande) "👓 Modo Letra Grande activado" else "🔤 Letra normal activada",
+                Toast.LENGTH_SHORT
+            ).show()
+            recreate()
+        }
         val btnPinD = crearBotonPrimario(this, "🔑 Cambiar mi PIN de Dueño") { dialogCambiarPin(prefs) }
         val btnSheet = crearBotonPrimario(this, "📊 Abrir Registro en Google Sheets") {
             val u = prefs.getString("sheet_url_cliente", "") ?: ""
@@ -943,7 +1074,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setOnClickListener { jobSincronizador?.cancel(); prefs.edit().putBoolean("cajero_logueado", false).apply(); mostrarSeccion(layoutPortada) }
         }
         cardCfg.addView(TextView(this).apply { text = "ESTADO DEL SISTEMA"; textSize = 15f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor(COLOR_PRIMARY)) })
-        cardCfg.addView(rowBdg); cardCfg.addView(switchDecirNombreVoz); cardCfg.addView(btnModoOscuroAjustes); cardCfg.addView(btnPinD); cardCfg.addView(btnSheet); cardCfg.addView(btnTestSound); cardCfg.addView(btnWspHelp); cardCfg.addView(btnPolitica); cardCfg.addView(btnLogout)
+        cardCfg.addView(rowBdg); cardCfg.addView(switchDecirNombreVoz); cardCfg.addView(btnLetraGrandeAjustes); cardCfg.addView(btnModoOscuroAjustes); cardCfg.addView(btnPinD); cardCfg.addView(btnSheet); cardCfg.addView(btnTestSound); cardCfg.addView(btnWspHelp); cardCfg.addView(btnPolitica); cardCfg.addView(btnLogout)
         tabConfiguracion.addView(cardCfg)
 
         containerTabs.addView(tabCajaPOS); containerTabs.addView(tabCajeros); containerTabs.addView(tabConfiguracion)
@@ -981,7 +1112,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val pRest = prefs.getInt("restaurar_pestaña", 0)
         if (pRest > 0) {
             prefs.edit().remove("restaurar_pestaña").apply()
-            esSesionDueño = true; entrarDirectoAlSistema(); seleccionarPestaña(pRest)
+            val eraCajero = prefs.getBoolean("cajero_logueado", false)
+            esSesionDueño = !eraCajero
+            if (eraCajero) {
+                timestampInicioTurnoCajero = prefs.getLong("cajero_inicio_turno_ms", 0L)
+                horaInicioTurnoStr = prefs.getString("cajero_hora_inicio", "") ?: ""
+                fechaInicioTurnoStr = prefs.getString("cajero_fecha_inicio", "") ?: ""
+            }
+            entrarDirectoAlSistema()
+            seleccionarPestaña(if (eraCajero) 1 else pRest)
         } else if (prefs.getBoolean("cajero_logueado", false)) {
             esSesionDueño = false
             timestampInicioTurnoCajero = prefs.getLong("cajero_inicio_turno_ms", 0L)
@@ -1033,6 +1172,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         pin: String,
         forzarTraslado: Boolean
     ) {
+        if (procesandoLoginCajero) return
+        procesandoLoginCajero = true
         val nuevoTokenSesion = "SES-" + Build.MODEL.replace(" ", "").take(6).uppercase(Locale.ROOT) + "-" + (10000..99999).random()
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -1055,6 +1196,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 if (status == "sesion_activa_otro_celular" && !forzarTraslado) {
                     val equipoAnterior = resJson.optString("equipoActivo", "otro celular")
                     runOnUiThread {
+                        procesandoLoginCajero = false
                         AlertDialog.Builder(this@MainActivity)
                             .setTitle("⚠️ Cajero ya abierto en otro celular")
                             .setMessage("El cajero '$caj' ya tiene un turno abierto en $equipoAnterior.\n\nPor seguridad no se permite usar el mismo cajero en 2 celulares al mismo tiempo.\n\n¿Deseas trasladar el turno a este celular y cerrar automáticamente el anterior?")
@@ -1086,6 +1228,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         .putBoolean("es_celular_dueño_receptor", false)
                         .apply()
                     runOnUiThread {
+                        procesandoLoginCajero = false
                         timestampInicioTurnoCajero = nowMs
                         horaInicioTurnoStr = hora
                         fechaInicioTurnoStr = fecha
@@ -1094,10 +1237,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     }
                 } else {
                     runOnUiThread {
+                        procesandoLoginCajero = false
                         Toast.makeText(this@MainActivity, resJson.optString("mensaje", "No se pudo iniciar sesión"), Toast.LENGTH_SHORT).show()
                     }
                 }
-            } catch (e: Exception) {}
+            } catch (e: Exception) {
+                runOnUiThread {
+                    procesandoLoginCajero = false
+                    Toast.makeText(this@MainActivity, "Error de conexión. Intenta nuevamente.", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
@@ -2268,21 +2417,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                setPadding(14, 10, 14, 10)
-                background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", "#E2E8F0", 12f)
-                elevation = 2f
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 0, 0, 6) }
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(if (esLetraGrande) 20 else 14, if (esLetraGrande) 16 else 10, if (esLetraGrande) 20 else 14, if (esLetraGrande) 16 else 10)
+                background = crearBordeRedondo(if (esModoOscuro) "#1E293B" else "#FFFFFF", if (esLetraGrande) "#A855F7" else "#E2E8F0", 14f)
+                elevation = if (esLetraGrande) 4f else 2f
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 0, 0, if (esLetraGrande) 10 else 6) }
             }
             val etiqCajero = if (cajeroItem.isNotEmpty()) " • 👤 $cajeroItem" else ""
             row.addView(TextView(this).apply {
                 text = "$nomStr ($hStr$etiqCajero)"
-                textSize = 14f; setTypeface(null, Typeface.BOLD)
+                textSize = if (esLetraGrande) 16.5f else 14f
+                setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.parseColor(if (esModoOscuro) "#F8FAFC" else "#0F172A"))
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             })
             row.addView(TextView(this).apply {
                 text = String.format(Locale.US, "+ S/ %.2f", montoLimpio)
-                textSize = 15f; setTypeface(null, Typeface.BOLD)
+                textSize = if (esLetraGrande) 18.5f else 15f
+                setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.parseColor(COLOR_PRIMARY))
             })
             layoutListaCobrosCaja.addView(row)
